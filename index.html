@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>Basketball 1v1 - Multiplayer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Main Menu -->
+    <div id="main-menu">
+        <h1>🏀 Basketball 1v1</h1>
+        <div class="menu-buttons">
+            <button id="vs-cpu-btn" class="menu-btn">Play vs CPU</button>
+            <button id="multiplayer-btn" class="menu-btn">Play Online</button>
+        </div>
+        <div id="connection-status"></div>
+    </div>
+
+    <div id="game-container" style="display: none;">
+        <!-- UI Overlay -->
+        <div id="ui-overlay">
+            <div id="top-bar">
+                <div id="level-display">Score: <span id="level-number">0 - 0</span></div>
+                <div id="controls">
+                    <button id="restart-btn" title="Restart (R)">↻</button>
+                    <button id="mute-btn" title="Mute">🔊</button>
+                </div>
+            </div>
+
+            <div id="message-container">
+                <div id="message"></div>
+            </div>
+        </div>
+
+        <!-- Game Canvas -->
+        <canvas id="game-canvas"></canvas>
+    </div>
+
+    <!-- Game Scripts -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>
