@@ -192,9 +192,60 @@ function setupInputHandlers() {
         }
     });
 
-    // Mouse/touch for shooting
+    // Mouse for shooting (desktop)
     game.canvas.addEventListener('mousedown', handleShoot);
-    game.canvas.addEventListener('touchstart', handleShoot);
+
+    // Mobile touch controls
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let isTouchMoving = false;
+
+    game.canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const rect = game.canvas.getBoundingClientRect();
+        touchStartX = touch.clientX - rect.left;
+        touchStartY = touch.clientY - rect.top;
+        isTouchMoving = false;
+
+        // Handle shooting if in air
+        if (!game.player.isGrounded && game.ball.owner === 'player') {
+            handleShoot(e);
+        } else if (game.player.isGrounded && !game.player.hasJumped) {
+            // Jump if on ground
+            jump(game.player);
+        }
+    });
+
+    game.canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        isTouchMoving = true;
+        const touch = e.touches[0];
+        const rect = game.canvas.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+
+        // Control movement based on touch position
+        if (x < rect.width / 3) {
+            // Left third - move left
+            game.keys['arrowleft'] = true;
+            game.keys['arrowright'] = false;
+        } else if (x > (rect.width * 2) / 3) {
+            // Right third - move right
+            game.keys['arrowright'] = true;
+            game.keys['arrowleft'] = false;
+        } else {
+            // Middle third - no movement (can still jump)
+            game.keys['arrowleft'] = false;
+            game.keys['arrowright'] = false;
+        }
+    });
+
+    game.canvas.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        game.keys['arrowleft'] = false;
+        game.keys['arrowright'] = false;
+        isTouchMoving = false;
+    });
 }
 
 function handleShoot(e) {
@@ -823,6 +874,9 @@ function render() {
 
     // Draw controls hint
     drawControls();
+
+    // Draw mobile touch zones
+    drawMobileTouchZones();
 }
 
 function drawCourt() {
@@ -1089,7 +1143,16 @@ function drawControls() {
     ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
     ctx.font = '14px Arial';
     ctx.textAlign = 'left';
-    ctx.fillText('CONTROLS: Arrow Keys/WASD = Move | SPACE = Jump | CLICK = Shoot | D = Defend', 10, 20);
+
+    // Detect mobile
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+    if (isMobile) {
+        ctx.fillText('MOBILE: Touch sides = Move | Tap = Jump/Shoot', 10, 20);
+    } else {
+        ctx.fillText('CONTROLS: Arrow Keys/WASD = Move | SPACE = Jump | CLICK = Shoot | D = Defend', 10, 20);
+    }
+
     ctx.fillText('First to 21 wins! | 2pts (inside arc) | 3pts (outside arc) | 5pts (half-court)', 10, 40);
 
     // Draw timer
@@ -1101,6 +1164,39 @@ function drawControls() {
     ctx.textAlign = 'center';
     ctx.fillStyle = game.timeRemaining < 30 ? '#FF5722' : '#fff';
     ctx.fillText(timeString, game.width / 2, 60);
+}
+
+function drawMobileTouchZones() {
+    // Only show on mobile devices
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    if (!isMobile) return;
+
+    const ctx = game.ctx;
+    const width = game.width;
+    const height = game.height;
+
+    // Draw subtle touch zone indicators
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+
+    // Left zone (move left)
+    ctx.fillRect(0, 0, width / 3, height);
+
+    // Right zone (move right)
+    ctx.fillRect((width * 2) / 3, 0, width / 3, height);
+
+    // Draw arrows
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.font = 'bold 40px Arial';
+    ctx.textAlign = 'center';
+
+    // Left arrow
+    ctx.fillText('◄', width / 6, height - 50);
+
+    // Jump indicator
+    ctx.fillText('TAP', width / 2, height - 50);
+
+    // Right arrow
+    ctx.fillText('►', (width * 5) / 6, height - 50);
 }
 
 // ====================
@@ -1207,15 +1303,29 @@ function playSound(type) {
 // ====================
 
 function initializeSocket() {
-    socket = io();
+    try {
+        socket = io({
+            transports: ['websocket', 'polling'],
+            timeout: 5000
+        });
 
-    socket.on('connect', () => {
-        console.log('Connected to server');
-    });
+        socket.on('connect', () => {
+            console.log('Connected to server');
+            document.getElementById('connection-status').textContent = 'Connected! Finding match...';
+        });
 
-    socket.on('waitingForOpponent', () => {
-        document.getElementById('connection-status').textContent = 'Waiting for opponent...';
-    });
+        socket.on('connect_error', (error) => {
+            console.error('Connection error:', error);
+            document.getElementById('connection-status').textContent = 'Connection failed. Please check server.';
+        });
+
+        socket.on('waitingForOpponent', () => {
+            document.getElementById('connection-status').textContent = 'Waiting for opponent...';
+        });
+    } catch (error) {
+        console.error('Socket initialization error:', error);
+        document.getElementById('connection-status').textContent = 'Connection failed.';
+    }
 
     socket.on('matchFound', (data) => {
         multiplayerData.roomId = data.roomId;
@@ -1352,16 +1462,37 @@ function emitScored(points) {
 // ====================
 
 window.addEventListener('DOMContentLoaded', () => {
-    // Initialize socket connection
-    initializeSocket();
+    console.log('DOM loaded, setting up menu...');
 
     // Setup menu buttons
-    document.getElementById('vs-cpu-btn').addEventListener('click', () => {
-        startSinglePlayerGame();
-    });
+    const vsCpuBtn = document.getElementById('vs-cpu-btn');
+    const multiplayerBtn = document.getElementById('multiplayer-btn');
 
-    document.getElementById('multiplayer-btn').addEventListener('click', () => {
-        document.getElementById('connection-status').textContent = 'Connecting to server...';
-        socket.emit('findMatch');
-    });
+    if (vsCpuBtn) {
+        vsCpuBtn.addEventListener('click', () => {
+            console.log('Single player clicked');
+            startSinglePlayerGame();
+        });
+    }
+
+    if (multiplayerBtn) {
+        multiplayerBtn.addEventListener('click', () => {
+            console.log('Multiplayer clicked');
+            document.getElementById('connection-status').textContent = 'Connecting to server...';
+
+            // Initialize socket only when needed for multiplayer
+            if (!socket) {
+                initializeSocket();
+            }
+
+            // Wait a moment for socket to connect
+            setTimeout(() => {
+                if (socket && socket.connected) {
+                    socket.emit('findMatch');
+                } else {
+                    document.getElementById('connection-status').textContent = 'Connection failed. Please try again.';
+                }
+            }, 500);
+        });
+    }
 });
