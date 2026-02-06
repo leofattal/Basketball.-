@@ -314,8 +314,23 @@ function shoot(entity) {
         return;
     }
 
-    // Calculate shot
-    const targetX = entity === game.player ? CONFIG.HOOP_LEFT_X : CONFIG.HOOP_RIGHT_X;
+    // Calculate shot - target the opponent's hoop
+    // In multiplayer: player 1 shoots at left hoop, player 2 shoots at right hoop
+    // In singleplayer: player shoots at left hoop, CPU shoots at right hoop
+    let targetX;
+    if (entity === game.player) {
+        if (gameMode === 'multiplayer' && multiplayerData.playerNumber === 2) {
+            targetX = CONFIG.HOOP_RIGHT_X; // Player 2 shoots at right hoop
+        } else {
+            targetX = CONFIG.HOOP_LEFT_X;  // Player 1 / singleplayer shoots at left hoop
+        }
+    } else {
+        if (gameMode === 'multiplayer' && multiplayerData.playerNumber === 2) {
+            targetX = CONFIG.HOOP_LEFT_X;  // Opponent of player 2 shoots at left hoop
+        } else {
+            targetX = CONFIG.HOOP_RIGHT_X; // CPU / opponent of player 1 shoots at right hoop
+        }
+    }
     const targetY = CONFIG.HOOP_Y;
 
     const dx = targetX - entity.x;
@@ -468,9 +483,24 @@ function resetGame() {
 }
 
 function resetPositions(lastScorer) {
-    // Reset players - they always return to their own sides
-    // Player defends right side, CPU defends left side
-    game.player.x = 600; // Always on right side
+    // In multiplayer, player 1 starts on right, player 2 starts on left
+    // In singleplayer, player is always on right
+    let playerStartX, cpuStartX;
+
+    if (gameMode === 'multiplayer') {
+        if (multiplayerData.playerNumber === 1) {
+            playerStartX = 600; // Player 1 on right
+            cpuStartX = 200;    // Player 2 (opponent) on left
+        } else {
+            playerStartX = 200; // Player 2 on left
+            cpuStartX = 600;    // Player 1 (opponent) on right
+        }
+    } else {
+        playerStartX = 600; // Singleplayer: player on right
+        cpuStartX = 200;    // CPU on left
+    }
+
+    game.player.x = playerStartX;
     game.player.y = CONFIG.COURT_FLOOR_Y;
     game.player.vx = 0;
     game.player.vy = 0;
@@ -478,7 +508,7 @@ function resetPositions(lastScorer) {
     game.player.hasJumped = false;
     game.player.defending = false;
 
-    game.cpu.x = 200; // Always on left side
+    game.cpu.x = cpuStartX;
     game.cpu.y = CONFIG.COURT_FLOOR_Y;
     game.cpu.vx = 0;
     game.cpu.vy = 0;
@@ -751,60 +781,51 @@ function checkScoring() {
     const hoopLeft = { x: CONFIG.HOOP_LEFT_X, y: CONFIG.HOOP_Y };
     const hoopRight = { x: CONFIG.HOOP_RIGHT_X, y: CONFIG.HOOP_Y };
 
-    // Player's hoop (left) - detection radius varies by shot distance
-    if (game.ball.inAir &&
-        game.ball.vy > 0 &&
-        game.ball.shotFrom) {
+    if (!game.ball.inAir || game.ball.vy <= 0 || !game.ball.shotFrom) {
+        return;
+    }
 
-        const distanceFromHoop = Math.abs(game.ball.shotFrom.x - game.ball.shotFrom.targetHoop);
+    const distanceFromHoop = Math.abs(game.ball.shotFrom.x - game.ball.shotFrom.targetHoop);
 
-        // Adjust detection radius based on shot distance
-        let detectionRadius = CONFIG.HOOP_RADIUS;
-        if (distanceFromHoop <= 150) {
-            // 2-pointer: Much easier - big detection radius
-            detectionRadius = CONFIG.HOOP_RADIUS + 20;
-        } else if (distanceFromHoop < 350) {
-            // 3-pointer: Harder - smaller detection radius
-            detectionRadius = CONFIG.HOOP_RADIUS + 5;
-        } else {
-            // Half-court (350+): Almost impossible - tiny detection radius
-            detectionRadius = CONFIG.HOOP_RADIUS - 5;
-        }
+    // Adjust detection radius based on shot distance
+    let detectionRadius = CONFIG.HOOP_RADIUS;
+    if (distanceFromHoop <= 150) {
+        detectionRadius = CONFIG.HOOP_RADIUS + 20;
+    } else if (distanceFromHoop < 350) {
+        detectionRadius = CONFIG.HOOP_RADIUS + 5;
+    } else {
+        detectionRadius = CONFIG.HOOP_RADIUS - 5;
+    }
 
-        if (Math.abs(game.ball.x - hoopLeft.x) < detectionRadius &&
-            Math.abs(game.ball.y - hoopLeft.y) < 30) {
+    // Determine which hoop the player shoots at based on player number
+    // Player 1 / singleplayer shoots at left hoop
+    // Player 2 shoots at right hoop
+    const playerTargetHoop = (gameMode === 'multiplayer' && multiplayerData.playerNumber === 2)
+        ? hoopRight
+        : hoopLeft;
+    const cpuTargetHoop = (gameMode === 'multiplayer' && multiplayerData.playerNumber === 2)
+        ? hoopLeft
+        : hoopRight;
 
+    // Check if ball goes through player's target hoop
+    if (Math.abs(game.ball.x - playerTargetHoop.x) < detectionRadius &&
+        Math.abs(game.ball.y - playerTargetHoop.y) < 30) {
+
+        if (game.ball.shotFrom.shooter === 'player') {
             const points = calculatePoints(game.ball.shotFrom);
-            game.ball.shotFrom = null; // Prevent multiple scoring
+            game.ball.shotFrom = null;
             score('player', points);
         }
     }
 
-    // CPU's hoop (right) - detection radius varies by shot distance
-    if (game.ball.inAir &&
-        game.ball.vy > 0 &&
-        game.ball.shotFrom) {
+    // Check if ball goes through CPU/opponent's target hoop
+    if (game.ball.shotFrom &&
+        Math.abs(game.ball.x - cpuTargetHoop.x) < detectionRadius &&
+        Math.abs(game.ball.y - cpuTargetHoop.y) < 30) {
 
-        const distanceFromHoop = Math.abs(game.ball.shotFrom.x - game.ball.shotFrom.targetHoop);
-
-        // Adjust detection radius based on shot distance
-        let detectionRadius = CONFIG.HOOP_RADIUS;
-        if (distanceFromHoop <= 150) {
-            // 2-pointer: Much easier - big detection radius
-            detectionRadius = CONFIG.HOOP_RADIUS + 20;
-        } else if (distanceFromHoop < 350) {
-            // 3-pointer: Harder - smaller detection radius
-            detectionRadius = CONFIG.HOOP_RADIUS + 5;
-        } else {
-            // Half-court (350+): Almost impossible - tiny detection radius
-            detectionRadius = CONFIG.HOOP_RADIUS - 5;
-        }
-
-        if (Math.abs(game.ball.x - hoopRight.x) < detectionRadius &&
-            Math.abs(game.ball.y - hoopRight.y) < 30) {
-
+        if (game.ball.shotFrom.shooter === 'cpu') {
             const points = calculatePoints(game.ball.shotFrom);
-            game.ball.shotFrom = null; // Prevent multiple scoring
+            game.ball.shotFrom = null;
             score('cpu', points);
         }
     }
@@ -1024,8 +1045,10 @@ function drawBall() {
 function drawShootingMeters() {
     const ctx = game.ctx;
 
-    // Draw aiming line to target hoop
-    const targetX = CONFIG.HOOP_LEFT_X;
+    // Draw aiming line to target hoop (based on which player we are)
+    const targetX = (gameMode === 'multiplayer' && multiplayerData.playerNumber === 2)
+        ? CONFIG.HOOP_RIGHT_X
+        : CONFIG.HOOP_LEFT_X;
     const targetY = CONFIG.HOOP_Y;
 
     ctx.strokeStyle = 'rgba(255, 215, 0, 0.6)';
