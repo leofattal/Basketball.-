@@ -9,8 +9,11 @@ const io = socketIo(server);
 
 const PORT = process.env.PORT || 8000;
 
-// Serve static files
-app.use(express.static(path.join(__dirname)));
+// Serve static files - use 'dist' folder in production, root in development
+const staticDir = process.env.NODE_ENV === 'production'
+    ? path.join(__dirname, 'dist')
+    : __dirname;
+app.use(express.static(staticDir));
 
 // Game rooms storage
 const rooms = new Map();
