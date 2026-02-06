@@ -356,18 +356,6 @@ function shoot(entity) {
 
     // Distance-based difficulty multiplier
     const distanceFromHoop = Math.abs(entity.x - targetX);
-    let difficultyMultiplier = 1;
-
-    if (distanceFromHoop <= 150) {
-        // 2-pointer: EASIER - more forgiving
-        difficultyMultiplier = 0.5;
-    } else if (distanceFromHoop < 350) {
-        // 3-pointer: HARDER - less forgiving
-        difficultyMultiplier = 2.0;
-    } else {
-        // Half-court (350+ distance): ALMOST IMPOSSIBLE - very unforgiving
-        difficultyMultiplier = 5.0;
-    }
 
     // Perfect accuracy (green zone) = PERFECT shot with NO spread
     // Good = small spread
@@ -377,58 +365,77 @@ function shoot(entity) {
         // PERFECT - guaranteed straight shot (even for half-court)
         accuracyVariance = 0;
     } else if (totalAccuracy >= 0.8) {
-        // Very good - tiny spread (affected by distance)
-        accuracyVariance = 3 * difficultyMultiplier;
+        // Very good - tiny spread
+        accuracyVariance = 2;
     } else if (totalAccuracy >= 0.6) {
-        // Good - small spread (more affected by distance)
-        accuracyVariance = 15 * difficultyMultiplier;
+        // Good - small spread
+        accuracyVariance = 8;
     } else {
-        // Bad - large spread (heavily affected by distance)
-        accuracyVariance = (1 - totalAccuracy) * 250 * difficultyMultiplier;
+        // Bad - large spread (more affected by distance)
+        accuracyVariance = (1 - totalAccuracy) * 80;
     }
 
-    const angleOffset = (Math.random() - 0.5) * accuracyVariance;
-
-    const angle = Math.atan2(dy, dx) + angleOffset * Math.PI / 180;
-
-    // Power calculation based on player's locked power and distance
+    // Power calculation based on player's locked power
     let powerQuality = 1;
     if (entity === game.player && game.shotStage === 2) {
         // Use locked power from stage 1
         if (game.lockedPower >= 75) {
             powerQuality = 1.0; // Perfect power
         } else if (game.lockedPower >= 50) {
-            powerQuality = 0.8 + (game.lockedPower - 50) / 25 * 0.2;
+            powerQuality = 0.85 + (game.lockedPower - 50) / 25 * 0.15;
         } else {
-            powerQuality = 0.5 + game.lockedPower / 50 * 0.3;
+            powerQuality = 0.6 + game.lockedPower / 50 * 0.25;
         }
     }
 
-    // Calculate base power - ensure minimum power for proper arc
-    // Short shots need less horizontal power but still need arc
-    const basePower = CONFIG.SHOT_POWER_MIN + (distance / 500) * (CONFIG.SHOT_POWER_MAX - CONFIG.SHOT_POWER_MIN);
-    const horizontalPower = basePower * powerQuality;
+    // Calculate proper arc trajectory using projectile physics
+    // We need to find the velocity that will make the ball land at the hoop
+    const gravity = CONFIG.BALL_GRAVITY;
 
-    // Calculate trajectory with proper arc
-    // For skill-based shooting, ensure the ball goes UP first
-    const horizontalVelocity = Math.cos(angle) * horizontalPower;
-    let verticalVelocity = Math.sin(angle) * horizontalPower;
-
-    // Ensure minimum arc for close shots (2-pointers)
-    // Perfect power should give a nice arc even for close shots
-    if (entity === game.player && game.shotStage === 2 && distanceFromHoop <= 150) {
-        // For 2-pointers, ensure good arc based on power quality
-        const minArc = -350 * powerQuality; // Negative = upward
-        if (verticalVelocity > minArc) {
-            verticalVelocity = minArc;
-        }
-    } else if (entity === game.player && game.shotStage === 2) {
-        // For 3-pointers and half-court, ensure sufficient arc
-        const minArc = -450 * powerQuality;
-        if (verticalVelocity > minArc) {
-            verticalVelocity = minArc;
-        }
+    // Choose arc height based on distance - longer shots need higher arcs
+    let arcHeight;
+    if (distanceFromHoop <= 150) {
+        // 2-pointer: moderate arc
+        arcHeight = 120;
+    } else if (distanceFromHoop < 350) {
+        // 3-pointer: higher arc for better angle into hoop
+        arcHeight = 180;
+    } else {
+        // Half-court: very high arc
+        arcHeight = 250;
     }
+
+    // Apply power quality to arc height (lower power = lower arc = harder shot)
+    arcHeight *= powerQuality;
+
+    // Calculate the peak Y position (ball starts at entity position, goes up by arcHeight)
+    const startY = entity.y - entity.height / 2;
+    const peakY = Math.min(startY, targetY) - arcHeight;
+
+    // Time to reach peak (using v = sqrt(2 * g * h))
+    const heightToPeak = startY - peakY;
+    const timeToPeak = Math.sqrt(2 * heightToPeak / gravity);
+
+    // Time from peak to target
+    const heightFromPeakToTarget = targetY - peakY;
+    const timeFromPeakToTarget = Math.sqrt(2 * heightFromPeakToTarget / gravity);
+
+    // Total flight time
+    const totalTime = timeToPeak + timeFromPeakToTarget;
+
+    // Calculate horizontal velocity needed to cover distance in that time
+    let horizontalVelocity = dx / totalTime;
+
+    // Calculate initial vertical velocity (negative = upward)
+    let verticalVelocity = -Math.sqrt(2 * gravity * heightToPeak);
+
+    // Apply accuracy variance as angular offset
+    const angleOffset = (Math.random() - 0.5) * accuracyVariance * Math.PI / 180;
+    const currentAngle = Math.atan2(verticalVelocity, horizontalVelocity);
+    const speed = Math.sqrt(horizontalVelocity * horizontalVelocity + verticalVelocity * verticalVelocity);
+
+    horizontalVelocity = Math.cos(currentAngle + angleOffset) * speed;
+    verticalVelocity = Math.sin(currentAngle + angleOffset) * speed;
 
     game.ball.vx = horizontalVelocity;
     game.ball.vy = verticalVelocity;
@@ -442,6 +449,11 @@ function shoot(entity) {
         shooter: entity === game.player ? 'player' : 'cpu',
         targetHoop: targetX
     };
+
+    // In multiplayer, immediately sync the shot
+    if (gameMode === 'multiplayer') {
+        emitBallUpdate();
+    }
 
     playSound('shoot');
 }
@@ -657,6 +669,10 @@ function updateCPU(dt) {
 }
 
 function updateBall(dt) {
+    // In multiplayer, player 1 is authoritative for ball physics
+    // Player 2 only receives ball state updates from player 1
+    const isHost = gameMode !== 'multiplayer' || multiplayerData.playerNumber === 1;
+
     if (game.ball.owner === 'player') {
         // Ball follows player
         game.ball.x = game.player.x;
@@ -670,45 +686,62 @@ function updateBall(dt) {
         game.ball.vx = 0;
         game.ball.vy = 0;
     } else if (game.ball.inAir) {
-        // Ball physics
-        game.ball.vy += CONFIG.BALL_GRAVITY * dt;
-        game.ball.x += game.ball.vx * dt;
-        game.ball.y += game.ball.vy * dt;
+        // Only host simulates ball physics in multiplayer
+        if (isHost) {
+            // Ball physics
+            game.ball.vy += CONFIG.BALL_GRAVITY * dt;
+            game.ball.x += game.ball.vx * dt;
+            game.ball.y += game.ball.vy * dt;
 
-        // Floor bounce
-        if (game.ball.y >= CONFIG.COURT_FLOOR_Y) {
-            game.ball.y = CONFIG.COURT_FLOOR_Y;
-            game.ball.vy *= -0.6;
-            game.ball.vx *= 0.8;
+            // Floor bounce
+            if (game.ball.y >= CONFIG.COURT_FLOOR_Y) {
+                game.ball.y = CONFIG.COURT_FLOOR_Y;
+                game.ball.vy *= -0.6;
+                game.ball.vx *= 0.8;
 
-            if (Math.abs(game.ball.vy) < 20) {
-                game.ball.inAir = false;
-                game.ball.vy = 0;
+                if (Math.abs(game.ball.vy) < 20) {
+                    game.ball.inAir = false;
+                    game.ball.vy = 0;
+                }
             }
-        }
 
-        // Wall bounce
-        if (game.ball.x < CONFIG.BALL_RADIUS || game.ball.x > game.width - CONFIG.BALL_RADIUS) {
-            game.ball.vx *= -0.7;
-            game.ball.x = Math.max(CONFIG.BALL_RADIUS, Math.min(game.width - CONFIG.BALL_RADIUS, game.ball.x));
+            // Wall bounce
+            if (game.ball.x < CONFIG.BALL_RADIUS || game.ball.x > game.width - CONFIG.BALL_RADIUS) {
+                game.ball.vx *= -0.7;
+                game.ball.x = Math.max(CONFIG.BALL_RADIUS, Math.min(game.width - CONFIG.BALL_RADIUS, game.ball.x));
+            }
+
+            // Sync ball state to other player
+            emitBallUpdate();
         }
     } else {
-        // Ball on ground - check pickup
-        const distToPlayer = Math.sqrt(
-            Math.pow(game.ball.x - game.player.x, 2) +
-            Math.pow(game.ball.y - game.player.y, 2)
-        );
-        const distToCPU = Math.sqrt(
-            Math.pow(game.ball.x - game.cpu.x, 2) +
-            Math.pow(game.ball.y - game.cpu.y, 2)
-        );
+        // Ball on ground - check pickup (only host decides in multiplayer)
+        if (isHost) {
+            const distToPlayer = Math.sqrt(
+                Math.pow(game.ball.x - game.player.x, 2) +
+                Math.pow(game.ball.y - game.player.y, 2)
+            );
+            const distToCPU = Math.sqrt(
+                Math.pow(game.ball.x - game.cpu.x, 2) +
+                Math.pow(game.ball.y - game.cpu.y, 2)
+            );
 
-        if (distToPlayer < CONFIG.STEAL_RANGE && distToPlayer < distToCPU) {
-            game.ball.owner = 'player';
-            playSound('pickup');
-        } else if (distToCPU < CONFIG.STEAL_RANGE && distToCPU <= distToPlayer) {
-            game.ball.owner = 'cpu';
-            playSound('pickup');
+            let newOwner = null;
+            if (distToPlayer < CONFIG.STEAL_RANGE && distToPlayer < distToCPU) {
+                newOwner = 'player';
+            } else if (distToCPU < CONFIG.STEAL_RANGE && distToCPU <= distToPlayer) {
+                newOwner = 'cpu';
+            }
+
+            if (newOwner) {
+                game.ball.owner = newOwner;
+                playSound('pickup');
+
+                // In multiplayer, emit the pickup
+                if (gameMode === 'multiplayer') {
+                    emitBallPickup(newOwner);
+                }
+            }
         }
     }
 }
@@ -1302,6 +1335,9 @@ function playSound(type) {
 // MULTIPLAYER FUNCTIONS
 // ====================
 
+let isReady = false;
+let opponentReady = false;
+
 function initializeSocket() {
     try {
         socket = io({
@@ -1311,32 +1347,63 @@ function initializeSocket() {
 
         socket.on('connect', () => {
             console.log('Connected to server');
-            document.getElementById('connection-status').textContent = 'Connected! Finding match...';
+            document.getElementById('lobby-status').textContent = 'Connected! Searching for opponent...';
         });
 
         socket.on('connect_error', (error) => {
             console.error('Connection error:', error);
-            document.getElementById('connection-status').textContent = 'Connection failed. Please check server.';
+            document.getElementById('lobby-status').textContent = 'Connection failed. Please check server.';
         });
 
         socket.on('waitingForOpponent', () => {
-            document.getElementById('connection-status').textContent = 'Waiting for opponent...';
+            document.getElementById('lobby-status').textContent = 'Searching for opponent...';
         });
     } catch (error) {
         console.error('Socket initialization error:', error);
-        document.getElementById('connection-status').textContent = 'Connection failed.';
+        document.getElementById('lobby-status').textContent = 'Connection failed.';
     }
 
+    // Match found - show ready lobby
     socket.on('matchFound', (data) => {
         multiplayerData.roomId = data.roomId;
         multiplayerData.playerNumber = data.playerNumber;
         multiplayerData.opponentId = data.opponentId;
 
-        document.getElementById('connection-status').textContent = 'Match found!';
+        // Reset ready states
+        isReady = false;
+        opponentReady = false;
 
-        setTimeout(() => {
-            startMultiplayerGame();
-        }, 1000);
+        // Show ready lobby
+        showReadyLobby();
+    });
+
+    // Opponent ready state changed
+    socket.on('opponentReadyState', (data) => {
+        opponentReady = data.ready;
+        updateReadyUI();
+
+        // Check if both players are ready
+        if (isReady && opponentReady) {
+            startCountdown();
+        }
+    });
+
+    // Both players ready - start countdown
+    socket.on('bothReady', () => {
+        startCountdown();
+    });
+
+    // Opponent left during ready phase
+    socket.on('opponentLeftLobby', () => {
+        isReady = false;
+        opponentReady = false;
+        document.getElementById('lobby-status').textContent = 'Opponent left. Searching again...';
+        showMatchmakingLobby();
+
+        // Re-queue for matchmaking
+        if (socket && socket.connected) {
+            socket.emit('findMatch');
+        }
     });
 
     socket.on('opponentMove', (data) => {
@@ -1353,13 +1420,35 @@ function initializeSocket() {
 
     socket.on('ballSync', (data) => {
         if (gameMode === 'multiplayer') {
-            game.ball.x = data.x;
-            game.ball.y = data.y;
-            game.ball.vx = data.vx;
-            game.ball.vy = data.vy;
-            game.ball.inAir = data.inAir;
-            game.ball.owner = data.owner;
-            game.ball.shotFrom = data.shotFrom;
+            // Only player 2 receives ball sync (player 1 is authoritative)
+            if (multiplayerData.playerNumber === 2) {
+                game.ball.x = data.x;
+                game.ball.y = data.y;
+                game.ball.vx = data.vx;
+                game.ball.vy = data.vy;
+                game.ball.inAir = data.inAir;
+
+                // Translate ownership from player 1's perspective to player 2's
+                // Player 1's 'player' = Player 2's 'cpu'
+                // Player 1's 'cpu' = Player 2's 'player'
+                if (data.owner === 'player') {
+                    game.ball.owner = 'cpu';
+                } else if (data.owner === 'cpu') {
+                    game.ball.owner = 'player';
+                } else {
+                    game.ball.owner = data.owner;
+                }
+
+                // Translate shotFrom as well
+                if (data.shotFrom) {
+                    game.ball.shotFrom = {
+                        ...data.shotFrom,
+                        shooter: data.shotFrom.shooter === 'player' ? 'cpu' : 'player'
+                    };
+                } else {
+                    game.ball.shotFrom = null;
+                }
+            }
         }
     });
 
@@ -1389,11 +1478,132 @@ function initializeSocket() {
             returnToMenu();
         }, 2000);
     });
+
+    // Ball pickup sync (from host to client)
+    socket.on('ballPickupSync', (data) => {
+        if (gameMode === 'multiplayer') {
+            // Convert owner from host's perspective to our perspective
+            // Host's 'player' = our 'cpu' if we're player 2
+            if (multiplayerData.playerNumber === 2) {
+                if (data.owner === 'player') {
+                    game.ball.owner = 'cpu';
+                } else if (data.owner === 'cpu') {
+                    game.ball.owner = 'player';
+                } else {
+                    game.ball.owner = data.owner;
+                }
+            } else {
+                game.ball.owner = data.owner;
+            }
+            playSound('pickup');
+        }
+    });
+}
+
+function showMatchmakingLobby() {
+    document.getElementById('main-menu').style.display = 'none';
+    document.getElementById('ready-lobby').style.display = 'none';
+    document.getElementById('game-container').style.display = 'none';
+    document.getElementById('matchmaking-lobby').style.display = 'block';
+}
+
+function showReadyLobby() {
+    document.getElementById('main-menu').style.display = 'none';
+    document.getElementById('matchmaking-lobby').style.display = 'none';
+    document.getElementById('game-container').style.display = 'none';
+    document.getElementById('ready-lobby').style.display = 'block';
+
+    // Reset UI
+    updateReadyUI();
+    const readyBtn = document.getElementById('ready-btn');
+    readyBtn.textContent = 'Ready!';
+    readyBtn.classList.remove('is-ready');
+}
+
+function updateReadyUI() {
+    const yourStatus = document.getElementById('your-ready-status');
+    const opponentStatus = document.getElementById('opponent-ready-status');
+
+    if (isReady) {
+        yourStatus.textContent = 'Ready!';
+        yourStatus.classList.remove('not-ready');
+        yourStatus.classList.add('ready');
+    } else {
+        yourStatus.textContent = 'Not Ready';
+        yourStatus.classList.remove('ready');
+        yourStatus.classList.add('not-ready');
+    }
+
+    if (opponentReady) {
+        opponentStatus.textContent = 'Ready!';
+        opponentStatus.classList.remove('not-ready');
+        opponentStatus.classList.add('ready');
+    } else {
+        opponentStatus.textContent = 'Not Ready';
+        opponentStatus.classList.remove('ready');
+        opponentStatus.classList.add('not-ready');
+    }
+}
+
+function toggleReady() {
+    isReady = !isReady;
+
+    const readyBtn = document.getElementById('ready-btn');
+    if (isReady) {
+        readyBtn.textContent = 'Waiting...';
+        readyBtn.classList.add('is-ready');
+    } else {
+        readyBtn.textContent = 'Ready!';
+        readyBtn.classList.remove('is-ready');
+    }
+
+    updateReadyUI();
+
+    // Notify server
+    if (socket && multiplayerData.roomId) {
+        socket.emit('playerReady', {
+            roomId: multiplayerData.roomId,
+            ready: isReady
+        });
+    }
+
+    // Check if both ready
+    if (isReady && opponentReady) {
+        startCountdown();
+    }
+}
+
+function startCountdown() {
+    // Create countdown overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'countdown-overlay';
+    overlay.id = 'countdown-overlay';
+    document.body.appendChild(overlay);
+
+    let count = 3;
+
+    function showCount() {
+        if (count > 0) {
+            overlay.innerHTML = `<div class="countdown-number">${count}</div>`;
+            count--;
+            setTimeout(showCount, 1000);
+        } else {
+            overlay.innerHTML = `<div class="countdown-number">GO!</div>`;
+            setTimeout(() => {
+                overlay.remove();
+                startMultiplayerGame();
+            }, 500);
+        }
+    }
+
+    showCount();
 }
 
 function startMultiplayerGame() {
     gameMode = 'multiplayer';
     document.getElementById('main-menu').style.display = 'none';
+    document.getElementById('matchmaking-lobby').style.display = 'none';
+    document.getElementById('ready-lobby').style.display = 'none';
     document.getElementById('game-container').style.display = 'block';
     init();
 }
@@ -1401,21 +1611,46 @@ function startMultiplayerGame() {
 function startSinglePlayerGame() {
     gameMode = 'singleplayer';
     document.getElementById('main-menu').style.display = 'none';
+    document.getElementById('matchmaking-lobby').style.display = 'none';
+    document.getElementById('ready-lobby').style.display = 'none';
     document.getElementById('game-container').style.display = 'block';
     init();
 }
 
 function returnToMenu() {
     gameMode = 'singleplayer';
+    const oldRoomId = multiplayerData.roomId;
     multiplayerData = { roomId: null, playerNumber: null, opponentId: null };
+    isReady = false;
+    opponentReady = false;
 
     document.getElementById('game-container').style.display = 'none';
+    document.getElementById('matchmaking-lobby').style.display = 'none';
+    document.getElementById('ready-lobby').style.display = 'none';
     document.getElementById('main-menu').style.display = 'block';
     document.getElementById('connection-status').textContent = '';
 
-    if (socket) {
-        socket.emit('leaveRoom', { roomId: multiplayerData.roomId });
+    // Remove countdown overlay if exists
+    const countdown = document.getElementById('countdown-overlay');
+    if (countdown) countdown.remove();
+
+    if (socket && oldRoomId) {
+        socket.emit('leaveRoom', { roomId: oldRoomId });
     }
+}
+
+function cancelMatchmaking() {
+    if (socket) {
+        socket.emit('cancelSearch');
+    }
+    returnToMenu();
+}
+
+function leaveLobby() {
+    if (socket && multiplayerData.roomId) {
+        socket.emit('leaveLobby', { roomId: multiplayerData.roomId });
+    }
+    returnToMenu();
 }
 
 function emitPlayerMove() {
@@ -1457,6 +1692,15 @@ function emitScored(points) {
     }
 }
 
+function emitBallPickup(owner) {
+    if (gameMode === 'multiplayer' && socket && multiplayerData.roomId) {
+        socket.emit('ballPickup', {
+            roomId: multiplayerData.roomId,
+            owner: owner
+        });
+    }
+}
+
 // ====================
 // START
 // ====================
@@ -1467,6 +1711,9 @@ window.addEventListener('DOMContentLoaded', () => {
     // Setup menu buttons
     const vsCpuBtn = document.getElementById('vs-cpu-btn');
     const multiplayerBtn = document.getElementById('multiplayer-btn');
+    const cancelSearchBtn = document.getElementById('cancel-search-btn');
+    const readyBtn = document.getElementById('ready-btn');
+    const leaveLobbyBtn = document.getElementById('leave-lobby-btn');
 
     if (vsCpuBtn) {
         vsCpuBtn.addEventListener('click', () => {
@@ -1478,7 +1725,10 @@ window.addEventListener('DOMContentLoaded', () => {
     if (multiplayerBtn) {
         multiplayerBtn.addEventListener('click', () => {
             console.log('Multiplayer clicked');
-            document.getElementById('connection-status').textContent = 'Connecting to server...';
+
+            // Show matchmaking lobby
+            showMatchmakingLobby();
+            document.getElementById('lobby-status').textContent = 'Connecting to server...';
 
             // Initialize socket only when needed for multiplayer
             if (!socket) {
@@ -1488,11 +1738,33 @@ window.addEventListener('DOMContentLoaded', () => {
             // Wait a moment for socket to connect
             setTimeout(() => {
                 if (socket && socket.connected) {
+                    document.getElementById('lobby-status').textContent = 'Searching for opponent...';
                     socket.emit('findMatch');
                 } else {
-                    document.getElementById('connection-status').textContent = 'Connection failed. Please try again.';
+                    document.getElementById('lobby-status').textContent = 'Connection failed. Please try again.';
                 }
             }, 500);
+        });
+    }
+
+    if (cancelSearchBtn) {
+        cancelSearchBtn.addEventListener('click', () => {
+            console.log('Cancel search clicked');
+            cancelMatchmaking();
+        });
+    }
+
+    if (readyBtn) {
+        readyBtn.addEventListener('click', () => {
+            console.log('Ready clicked');
+            toggleReady();
+        });
+    }
+
+    if (leaveLobbyBtn) {
+        leaveLobbyBtn.addEventListener('click', () => {
+            console.log('Leave lobby clicked');
+            leaveLobby();
         });
     }
 });

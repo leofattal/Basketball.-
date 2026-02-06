@@ -33,13 +33,16 @@ io.on('connection', (socket) => {
             socket.join(roomId);
             opponent.join(roomId);
 
-            // Initialize room state
+            // Initialize room state with ready status
             rooms.set(roomId, {
                 player1: socket.id,
                 player2: opponent.id,
+                player1Ready: false,
+                player2Ready: false,
                 score: { player1: 0, player2: 0 },
                 timeRemaining: 300,
-                ballOwner: 'player1'
+                ballOwner: 'player1',
+                gameStarted: false
             });
 
             // Notify both players
@@ -75,7 +78,7 @@ io.on('connection', (socket) => {
         });
     });
 
-    // Handle ball updates
+    // Handle ball updates (from host/player 1)
     socket.on('ballUpdate', (data) => {
         socket.to(data.roomId).emit('ballSync', {
             x: data.x,
@@ -85,6 +88,13 @@ io.on('connection', (socket) => {
             inAir: data.inAir,
             owner: data.owner,
             shotFrom: data.shotFrom
+        });
+    });
+
+    // Handle ball pickup (from host/player 1)
+    socket.on('ballPickup', (data) => {
+        socket.to(data.roomId).emit('ballPickupSync', {
+            owner: data.owner
         });
     });
 
@@ -153,7 +163,57 @@ io.on('connection', (socket) => {
         });
     });
 
-    // Handle return to menu
+    // Handle player ready state
+    socket.on('playerReady', (data) => {
+        const room = rooms.get(data.roomId);
+        if (room) {
+            // Update ready state
+            if (room.player1 === socket.id) {
+                room.player1Ready = data.ready;
+            } else if (room.player2 === socket.id) {
+                room.player2Ready = data.ready;
+            }
+
+            // Notify opponent of ready state change
+            socket.to(data.roomId).emit('opponentReadyState', {
+                ready: data.ready
+            });
+
+            // Check if both players are ready
+            if (room.player1Ready && room.player2Ready && !room.gameStarted) {
+                room.gameStarted = true;
+                io.to(data.roomId).emit('bothReady');
+                console.log('Both players ready in room:', data.roomId);
+            }
+        }
+    });
+
+    // Handle cancel matchmaking search
+    socket.on('cancelSearch', () => {
+        const waitingIndex = waitingPlayers.indexOf(socket);
+        if (waitingIndex > -1) {
+            waitingPlayers.splice(waitingIndex, 1);
+            console.log('Player cancelled search:', socket.id);
+        }
+    });
+
+    // Handle leaving the ready lobby (before game starts)
+    socket.on('leaveLobby', (data) => {
+        if (data.roomId) {
+            const room = rooms.get(data.roomId);
+            if (room && !room.gameStarted) {
+                // Notify opponent
+                socket.to(data.roomId).emit('opponentLeftLobby');
+                socket.leave(data.roomId);
+
+                // Delete the room
+                rooms.delete(data.roomId);
+                console.log('Player left lobby, room deleted:', data.roomId);
+            }
+        }
+    });
+
+    // Handle return to menu (during game)
     socket.on('leaveRoom', (data) => {
         if (data.roomId) {
             socket.to(data.roomId).emit('opponentLeft');

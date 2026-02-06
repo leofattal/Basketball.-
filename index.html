@@ -18,6 +18,42 @@
         <div id="connection-status"></div>
     </div>
 
+    <!-- Matchmaking Lobby -->
+    <div id="matchmaking-lobby" style="display: none;">
+        <div class="lobby-content">
+            <h2>Finding Match</h2>
+            <div class="search-animation">
+                <div class="search-dots">
+                    <span></span><span></span><span></span>
+                </div>
+            </div>
+            <p id="lobby-status">Searching for opponent...</p>
+            <button id="cancel-search-btn" class="menu-btn cancel-btn">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Ready Lobby (after match found) -->
+    <div id="ready-lobby" style="display: none;">
+        <div class="lobby-content">
+            <h2>Opponent Found!</h2>
+            <div class="players-ready">
+                <div class="player-card you">
+                    <div class="player-avatar">🏀</div>
+                    <p>You</p>
+                    <div id="your-ready-status" class="ready-status not-ready">Not Ready</div>
+                </div>
+                <div class="vs-text">VS</div>
+                <div class="player-card opponent">
+                    <div class="player-avatar">🏀</div>
+                    <p>Opponent</p>
+                    <div id="opponent-ready-status" class="ready-status not-ready">Not Ready</div>
+                </div>
+            </div>
+            <button id="ready-btn" class="menu-btn ready-btn">Ready!</button>
+            <button id="leave-lobby-btn" class="menu-btn cancel-btn">Leave</button>
+        </div>
+    </div>
+
     <div id="game-container" style="display: none;">
         <!-- UI Overlay -->
         <div id="ui-overlay">
