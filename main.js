@@ -127,28 +127,59 @@ const game = {
 // INITIALIZATION
 // ====================
 
+let gameInitialized = false;
+let gameLoopRunning = false;
+
 function init() {
-    game.canvas = document.getElementById('game-canvas');
-    game.ctx = game.canvas.getContext('2d');
+    // Only set up canvas, listeners, and game loop ONCE
+    if (!gameInitialized) {
+        game.canvas = document.getElementById('game-canvas');
+        game.ctx = game.canvas.getContext('2d');
 
-    resizeCanvas();
-    window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
 
-    setupInputHandlers();
-    setupUI();
+        setupInputHandlers();
+        setupUI();
 
-    // Start game loop
-    let lastTime = 0;
-    function gameLoop(timestamp) {
-        const deltaTime = lastTime ? (timestamp - lastTime) / 1000 : 0;
-        lastTime = timestamp;
+        gameInitialized = true;
+    }
 
-        update(Math.min(deltaTime, 0.1));
-        render();
+    // Reset game state for new game
+    resetGameState();
 
+    // Start game loop only if not already running
+    if (!gameLoopRunning) {
+        gameLoopRunning = true;
+        let lastTime = 0;
+        function gameLoop(timestamp) {
+            const deltaTime = lastTime ? (timestamp - lastTime) / 1000 : 0;
+            lastTime = timestamp;
+
+            update(Math.min(deltaTime, 0.1));
+            render();
+
+            requestAnimationFrame(gameLoop);
+        }
         requestAnimationFrame(gameLoop);
     }
-    requestAnimationFrame(gameLoop);
+}
+
+function resetGameState() {
+    game.state = STATES.PLAYING;
+    game.score = { player: 0, cpu: 0 };
+    game.timeRemaining = CONFIG.GAME_TIME;
+    game.shotCharging = false;
+    game.shotStage = 0;
+    game.shotPower = 0;
+    game.lockedPower = 0;
+    game.shotAccuracy = 0;
+    game.accuracyDirection = 1;
+    game.timeScale = 1;
+
+    resetPositions('player');
+    updateScoreDisplay();
+    hideMessage();
 }
 
 function resizeCanvas() {
@@ -557,16 +588,17 @@ function update(dt) {
     checkScoring();
 
     // Update shot charging mechanics (always at normal speed for UI responsiveness)
+    // Slowed down meters: power takes ~2 seconds to fill, accuracy takes ~1.5 seconds per sweep
     if (game.shotCharging) {
         if (game.shotStage === 1) {
-            // Stage 1: Power meter cycles
-            game.shotPower += dt * 100;
+            // Stage 1: Power meter cycles (slower - 50 units/sec = 2 sec to fill)
+            game.shotPower += dt * 50;
             if (game.shotPower >= 100) {
                 game.shotPower = 0; // Reset to 0 when it reaches max
             }
         } else if (game.shotStage === 2) {
-            // Stage 2: Accuracy meter oscillates
-            game.shotAccuracy += game.accuracyDirection * dt * 150;
+            // Stage 2: Accuracy meter oscillates (slower - 70 units/sec = ~1.4 sec per sweep)
+            game.shotAccuracy += game.accuracyDirection * dt * 70;
             if (game.shotAccuracy >= 100) {
                 game.shotAccuracy = 100;
                 game.accuracyDirection = -1;
@@ -910,9 +942,28 @@ function render() {
     drawHoop(CONFIG.HOOP_LEFT_X, CONFIG.HOOP_Y, true);
     drawHoop(CONFIG.HOOP_RIGHT_X, CONFIG.HOOP_Y, false);
 
-    // Draw players
-    drawPlayer(game.cpu, '#e94560');
-    drawPlayer(game.player, '#4CAF50');
+    // Draw players with consistent colors across both screens
+    // In multiplayer: Player 1 is always green, Player 2 is always red
+    // The "player" entity is whoever YOU control, "cpu" is opponent
+    let playerColor, cpuColor;
+    if (gameMode === 'multiplayer') {
+        if (multiplayerData.playerNumber === 1) {
+            // I'm player 1: I'm green, opponent (cpu) is red
+            playerColor = '#4CAF50';
+            cpuColor = '#e94560';
+        } else {
+            // I'm player 2: I'm red, opponent (cpu) is green
+            playerColor = '#e94560';
+            cpuColor = '#4CAF50';
+        }
+    } else {
+        // Singleplayer: player is green, CPU is red
+        playerColor = '#4CAF50';
+        cpuColor = '#e94560';
+    }
+
+    drawPlayer(game.cpu, cpuColor);
+    drawPlayer(game.player, playerColor);
 
     // Draw ball
     drawBall();
