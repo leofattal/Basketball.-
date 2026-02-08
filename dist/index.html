@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <title>Basketball 1v1 - Multiplayer</title>
-  <script type="module" crossorigin src="/assets/index-CfhamFVl.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-BeN1QK8g.css">
+  <script type="module" crossorigin src="/assets/index-BcHsxk9d.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-CpCJLVKo.css">
 </head>
 <body>
     <!-- Main Menu -->
@@ -73,6 +73,22 @@
 
         <!-- Game Canvas -->
         <canvas id="game-canvas"></canvas>
+
+        <!-- Mobile Controls -->
+        <div id="mobile-controls">
+            <!-- Left side: D-pad for movement -->
+            <div id="dpad-container">
+                <button id="dpad-left" class="dpad-btn">◀</button>
+                <button id="dpad-right" class="dpad-btn">▶</button>
+            </div>
+
+            <!-- Right side: Action buttons -->
+            <div id="action-buttons">
+                <button id="btn-jump" class="action-btn jump-btn">JUMP</button>
+                <button id="btn-shoot" class="action-btn shoot-btn">SHOOT</button>
+                <button id="btn-defend" class="action-btn defend-btn">DEF</button>
+            </div>
+        </div>
     </div>
 
     <!-- Game Scripts -->

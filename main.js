@@ -200,6 +200,11 @@ function resizeCanvas() {
 // INPUT HANDLING
 // ====================
 
+// Check if device is mobile/touch
+const isMobileDevice = () => {
+    return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+};
+
 function setupInputHandlers() {
     // Keyboard
     document.addEventListener('keydown', (e) => {
@@ -226,57 +231,114 @@ function setupInputHandlers() {
     // Mouse for shooting (desktop)
     game.canvas.addEventListener('mousedown', handleShoot);
 
-    // Mobile touch controls
-    let touchStartX = 0;
-    let touchStartY = 0;
-    let isTouchMoving = false;
+    // Setup mobile controls
+    setupMobileControls();
+}
 
+function setupMobileControls() {
+    // D-pad buttons
+    const dpadLeft = document.getElementById('dpad-left');
+    const dpadRight = document.getElementById('dpad-right');
+
+    // Action buttons
+    const btnJump = document.getElementById('btn-jump');
+    const btnShoot = document.getElementById('btn-shoot');
+    const btnDefend = document.getElementById('btn-defend');
+
+    if (!dpadLeft || !dpadRight || !btnJump || !btnShoot || !btnDefend) {
+        return; // Mobile controls not in DOM yet
+    }
+
+    // Helper to add both touch and mouse events for testing
+    const addButtonEvents = (btn, onDown, onUp) => {
+        // Touch events
+        btn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            btn.classList.add('active');
+            onDown();
+        }, { passive: false });
+
+        btn.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            btn.classList.remove('active');
+            if (onUp) onUp();
+        }, { passive: false });
+
+        btn.addEventListener('touchcancel', (e) => {
+            btn.classList.remove('active');
+            if (onUp) onUp();
+        });
+
+        // Mouse events for desktop testing
+        btn.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            btn.classList.add('active');
+            onDown();
+        });
+
+        btn.addEventListener('mouseup', (e) => {
+            btn.classList.remove('active');
+            if (onUp) onUp();
+        });
+
+        btn.addEventListener('mouseleave', (e) => {
+            btn.classList.remove('active');
+            if (onUp) onUp();
+        });
+    };
+
+    // D-pad Left
+    addButtonEvents(
+        dpadLeft,
+        () => { game.keys['arrowleft'] = true; },
+        () => { game.keys['arrowleft'] = false; }
+    );
+
+    // D-pad Right
+    addButtonEvents(
+        dpadRight,
+        () => { game.keys['arrowright'] = true; },
+        () => { game.keys['arrowright'] = false; }
+    );
+
+    // Jump button
+    addButtonEvents(
+        btnJump,
+        () => {
+            if (game.player.isGrounded && !game.player.hasJumped) {
+                jump(game.player);
+            }
+        },
+        null
+    );
+
+    // Shoot button - handles the shooting meter stages
+    addButtonEvents(
+        btnShoot,
+        () => {
+            // Player must be in air and have the ball to shoot
+            if (!game.player.isGrounded && game.ball.owner === 'player') {
+                handleShoot({ preventDefault: () => {} });
+            }
+        },
+        null
+    );
+
+    // Defend button
+    addButtonEvents(
+        btnDefend,
+        () => { game.player.defending = true; },
+        () => { game.player.defending = false; }
+    );
+
+    // Also handle canvas tap for shooting when in air (backup)
     game.canvas.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        const touch = e.touches[0];
-        const rect = game.canvas.getBoundingClientRect();
-        touchStartX = touch.clientX - rect.left;
-        touchStartY = touch.clientY - rect.top;
-        isTouchMoving = false;
-
-        // Handle shooting if in air
-        if (!game.player.isGrounded && game.ball.owner === 'player') {
-            handleShoot(e);
-        } else if (game.player.isGrounded && !game.player.hasJumped) {
-            // Jump if on ground
-            jump(game.player);
+        // Only handle if shooting meter is active (need to tap to progress)
+        if (game.shotCharging && game.shotStage > 0) {
+            e.preventDefault();
+            handleShoot({ preventDefault: () => {} });
         }
-    });
-
-    game.canvas.addEventListener('touchmove', (e) => {
-        e.preventDefault();
-        isTouchMoving = true;
-        const touch = e.touches[0];
-        const rect = game.canvas.getBoundingClientRect();
-        const x = touch.clientX - rect.left;
-
-        // Control movement based on touch position
-        if (x < rect.width / 3) {
-            // Left third - move left
-            game.keys['arrowleft'] = true;
-            game.keys['arrowright'] = false;
-        } else if (x > (rect.width * 2) / 3) {
-            // Right third - move right
-            game.keys['arrowright'] = true;
-            game.keys['arrowleft'] = false;
-        } else {
-            // Middle third - no movement (can still jump)
-            game.keys['arrowleft'] = false;
-            game.keys['arrowright'] = false;
-        }
-    });
-
-    game.canvas.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        game.keys['arrowleft'] = false;
-        game.keys['arrowright'] = false;
-        isTouchMoving = false;
-    });
+    }, { passive: false });
 }
 
 function handleShoot(e) {
@@ -1251,12 +1313,8 @@ function drawControls() {
     ctx.font = '14px Arial';
     ctx.textAlign = 'left';
 
-    // Detect mobile
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-
-    if (isMobile) {
-        ctx.fillText('MOBILE: Touch sides = Move | Tap = Jump/Shoot', 10, 20);
-    } else {
+    // Only show keyboard controls on desktop (mobile has on-screen buttons)
+    if (!isMobileDevice()) {
         ctx.fillText('CONTROLS: Arrow Keys/WASD = Move | SPACE = Jump | CLICK = Shoot | D = Defend', 10, 20);
     }
 
@@ -1274,36 +1332,8 @@ function drawControls() {
 }
 
 function drawMobileTouchZones() {
-    // Only show on mobile devices
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    if (!isMobile) return;
-
-    const ctx = game.ctx;
-    const width = game.width;
-    const height = game.height;
-
-    // Draw subtle touch zone indicators
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-
-    // Left zone (move left)
-    ctx.fillRect(0, 0, width / 3, height);
-
-    // Right zone (move right)
-    ctx.fillRect((width * 2) / 3, 0, width / 3, height);
-
-    // Draw arrows
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-    ctx.font = 'bold 40px Arial';
-    ctx.textAlign = 'center';
-
-    // Left arrow
-    ctx.fillText('◄', width / 6, height - 50);
-
-    // Jump indicator
-    ctx.fillText('TAP', width / 2, height - 50);
-
-    // Right arrow
-    ctx.fillText('►', (width * 5) / 6, height - 50);
+    // No longer needed - we have dedicated mobile control buttons
+    // This function is kept for compatibility but does nothing
 }
 
 // ====================

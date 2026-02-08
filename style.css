@@ -469,3 +469,123 @@ button:active {
         font-size: 22px;
     }
 }
+
+/* Mobile Controls */
+#mobile-controls {
+    display: none;
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 140px;
+    pointer-events: none;
+    z-index: 100;
+}
+
+/* Show mobile controls only on touch devices */
+@media (pointer: coarse) {
+    #mobile-controls {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        padding: 10px 15px;
+    }
+}
+
+/* D-pad container */
+#dpad-container {
+    display: flex;
+    gap: 10px;
+    pointer-events: auto;
+}
+
+.dpad-btn {
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.25);
+    border: 3px solid rgba(255, 255, 255, 0.4);
+    color: white;
+    font-size: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+    transition: all 0.1s;
+}
+
+.dpad-btn:active,
+.dpad-btn.active {
+    background: rgba(255, 255, 255, 0.5);
+    transform: scale(0.95);
+}
+
+/* Action buttons container */
+#action-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: auto;
+}
+
+.action-btn {
+    width: 80px;
+    height: 45px;
+    border-radius: 12px;
+    border: 2px solid rgba(255, 255, 255, 0.5);
+    color: white;
+    font-size: 14px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+    transition: all 0.1s;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.action-btn:active,
+.action-btn.active {
+    transform: scale(0.95);
+}
+
+.jump-btn {
+    background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+}
+
+.jump-btn:active,
+.jump-btn.active {
+    background: linear-gradient(135deg, #45a049 0%, #3d8b40 100%);
+}
+
+.shoot-btn {
+    background: linear-gradient(135deg, #ff6b35 0%, #ff5722 100%);
+}
+
+.shoot-btn:active,
+.shoot-btn.active {
+    background: linear-gradient(135deg, #ff5722 0%, #e64a19 100%);
+}
+
+.defend-btn {
+    background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+}
+
+.defend-btn:active,
+.defend-btn.active {
+    background: linear-gradient(135deg, #1976D2 0%, #1565C0 100%);
+}
+
+/* Adjust game container for mobile controls */
+@media (pointer: coarse) {
+    #game-canvas {
+        height: calc(100% - 140px) !important;
+    }
+}
