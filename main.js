@@ -49,6 +49,12 @@ const CONFIG = {
     // AI
     AI_REACTION_TIME: 0.3,
     AI_SHOOT_CHANCE: 0.6,
+
+    // Power-ups
+    POWERUP_SPAWN_INTERVAL: 8, // seconds between spawns
+    POWERUP_DURATION: 5, // seconds each power-up lasts
+    POWERUP_SIZE: 20, // radius
+    POWERUP_PICKUP_RANGE: 40,
 };
 
 // ====================
@@ -121,6 +127,12 @@ const game = {
     shotAccuracy: 0,
     accuracyDirection: 1, // 1 or -1 for oscillating
     timeScale: 1, // 1 = normal, 0 = frozen, 0.1 = slow-mo
+
+    // Power-ups
+    powerups: [], // Active power-ups on the court { x, y, type, bobOffset }
+    powerupTimer: 0, // Timer until next spawn
+    playerEffects: { speed: 0, highJump: 0 }, // Remaining duration of active effects
+    cpuEffects: { speed: 0, highJump: 0 },
 };
 
 // ====================
@@ -176,6 +188,12 @@ function resetGameState() {
     game.shotAccuracy = 0;
     game.accuracyDirection = 1;
     game.timeScale = 1;
+
+    // Reset power-ups
+    game.powerups = [];
+    game.powerupTimer = CONFIG.POWERUP_SPAWN_INTERVAL;
+    game.playerEffects = { speed: 0, highJump: 0 };
+    game.cpuEffects = { speed: 0, highJump: 0 };
 
     resetPositions('player');
     updateScoreDisplay();
@@ -375,7 +393,11 @@ function handleShoot(e) {
 
 function jump(entity) {
     if (entity.isGrounded) {
-        entity.vy = -CONFIG.JUMP_POWER;
+        // Check for high jump power-up
+        const effects = entity === game.player ? game.playerEffects : game.cpuEffects;
+        const jumpMultiplier = effects.highJump > 0 ? 1.6 : 1;
+
+        entity.vy = -CONFIG.JUMP_POWER * jumpMultiplier;
         entity.isGrounded = false;
         entity.hasJumped = true;
         entity.jumpTime = 0;
@@ -625,6 +647,73 @@ function resetPositions(lastScorer) {
 }
 
 // ====================
+// POWER-UPS
+// ====================
+
+const POWERUP_TYPES = [
+    { id: 'speed', label: 'SPEED', color: '#00E5FF', icon: '⚡' },
+    { id: 'highJump', label: 'HIGH JUMP', color: '#76FF03', icon: '🦘' },
+];
+
+function spawnPowerup() {
+    const type = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
+    // Spawn between the two hoops, avoiding edges
+    const x = 200 + Math.random() * 400;
+    const y = CONFIG.COURT_FLOOR_Y - 30 - Math.random() * 100;
+    game.powerups.push({
+        x, y,
+        type: type.id,
+        bobOffset: Math.random() * Math.PI * 2,
+        age: 0,
+    });
+}
+
+function updatePowerups(dt) {
+    if (dt <= 0) return;
+
+    // Countdown effect timers
+    if (game.playerEffects.speed > 0) game.playerEffects.speed -= dt;
+    if (game.playerEffects.highJump > 0) game.playerEffects.highJump -= dt;
+    if (game.cpuEffects.speed > 0) game.cpuEffects.speed -= dt;
+    if (game.cpuEffects.highJump > 0) game.cpuEffects.highJump -= dt;
+
+    // Spawn timer
+    game.powerupTimer -= dt;
+    if (game.powerupTimer <= 0 && game.powerups.length < 2) {
+        spawnPowerup();
+        game.powerupTimer = CONFIG.POWERUP_SPAWN_INTERVAL;
+    }
+
+    // Update bob animation age
+    for (const p of game.powerups) {
+        p.age += dt;
+    }
+
+    // Check pickup by player
+    for (let i = game.powerups.length - 1; i >= 0; i--) {
+        const pu = game.powerups[i];
+        const distPlayer = Math.sqrt(
+            Math.pow(pu.x - game.player.x, 2) +
+            Math.pow(pu.y - game.player.y, 2)
+        );
+        const distCpu = Math.sqrt(
+            Math.pow(pu.x - game.cpu.x, 2) +
+            Math.pow(pu.y - game.cpu.y, 2)
+        );
+
+        if (distPlayer < CONFIG.POWERUP_PICKUP_RANGE) {
+            game.playerEffects[pu.type] = CONFIG.POWERUP_DURATION;
+            game.powerups.splice(i, 1);
+            playSound('pickup');
+        } else if (distCpu < CONFIG.POWERUP_PICKUP_RANGE && gameMode !== 'multiplayer') {
+            // CPU picks up in singleplayer only
+            game.cpuEffects[pu.type] = CONFIG.POWERUP_DURATION;
+            game.powerups.splice(i, 1);
+        }
+    }
+}
+
+// ====================
 // UPDATE LOGIC
 // ====================
 
@@ -644,6 +733,7 @@ function update(dt) {
         }
     }
 
+    updatePowerups(scaledDt);
     updatePlayer(scaledDt);
     updateCPU(scaledDt);
     updateBall(scaledDt);
@@ -674,13 +764,14 @@ function update(dt) {
 
 function updatePlayer(dt) {
     const p = game.player;
+    const speedMultiplier = game.playerEffects.speed > 0 ? 1.8 : 1;
 
     // Horizontal movement
     if (game.keys['arrowleft'] || game.keys['a']) {
-        p.vx = -CONFIG.MOVE_SPEED;
+        p.vx = -CONFIG.MOVE_SPEED * speedMultiplier;
         p.facingLeft = true;
     } else if (game.keys['arrowright'] || game.keys['d']) {
-        p.vx = CONFIG.MOVE_SPEED;
+        p.vx = CONFIG.MOVE_SPEED * speedMultiplier;
         p.facingLeft = false;
     } else {
         p.vx = 0;
@@ -724,6 +815,7 @@ function updateCPU(dt) {
     if (gameMode === 'multiplayer') return;
 
     const cpu = game.cpu;
+    const cpuSpeedMult = game.cpuEffects.speed > 0 ? 1.8 : 1;
     cpu.nextAction -= dt;
 
     // Simple AI
@@ -732,7 +824,7 @@ function updateCPU(dt) {
         const targetX = CONFIG.HOOP_RIGHT_X - 150;
 
         if (Math.abs(cpu.x - targetX) > 20) {
-            cpu.vx = cpu.x < targetX ? CONFIG.MOVE_SPEED : -CONFIG.MOVE_SPEED;
+            cpu.vx = (cpu.x < targetX ? CONFIG.MOVE_SPEED : -CONFIG.MOVE_SPEED) * cpuSpeedMult;
             cpu.facingLeft = cpu.vx < 0;
         } else {
             cpu.vx = 0;
@@ -750,7 +842,7 @@ function updateCPU(dt) {
         const distToPlayer = Math.abs(cpu.x - game.player.x);
 
         if (distToPlayer > 50) {
-            cpu.vx = cpu.x < game.player.x ? CONFIG.MOVE_SPEED * 0.8 : -CONFIG.MOVE_SPEED * 0.8;
+            cpu.vx = (cpu.x < game.player.x ? CONFIG.MOVE_SPEED * 0.8 : -CONFIG.MOVE_SPEED * 0.8) * cpuSpeedMult;
             cpu.facingLeft = cpu.vx < 0;
         } else {
             cpu.vx = 0;
@@ -765,7 +857,7 @@ function updateCPU(dt) {
     } else {
         // Chase loose ball
         if (Math.abs(cpu.x - game.ball.x) > 20) {
-            cpu.vx = cpu.x < game.ball.x ? CONFIG.MOVE_SPEED : -CONFIG.MOVE_SPEED;
+            cpu.vx = (cpu.x < game.ball.x ? CONFIG.MOVE_SPEED : -CONFIG.MOVE_SPEED) * cpuSpeedMult;
             cpu.facingLeft = cpu.vx < 0;
         } else {
             cpu.vx = 0;
@@ -1027,8 +1119,14 @@ function render() {
     drawPlayer(game.cpu, cpuColor);
     drawPlayer(game.player, playerColor);
 
+    // Draw power-ups on court
+    drawPowerups();
+
     // Draw ball
     drawBall();
+
+    // Draw active effect indicators on players
+    drawEffectIndicators();
 
     // Draw shooting meters and time freeze effect
     if (game.shotCharging) {
@@ -1305,6 +1403,96 @@ function drawShootingMeters() {
         ctx.font = 'bold 18px Arial';
         ctx.fillText(qualityText, meterX + meterWidth / 2, accMeterY + 70);
     }
+}
+
+function drawPowerups() {
+    const ctx = game.ctx;
+
+    for (const pu of game.powerups) {
+        const typeInfo = POWERUP_TYPES.find(t => t.id === pu.type);
+        if (!typeInfo) continue;
+
+        // Bobbing animation
+        const bobY = pu.y + Math.sin(pu.age * 3 + pu.bobOffset) * 6;
+
+        // Glow effect
+        ctx.save();
+        ctx.shadowColor = typeInfo.color;
+        ctx.shadowBlur = 15 + Math.sin(pu.age * 4) * 5;
+
+        // Circle background
+        ctx.fillStyle = typeInfo.color;
+        ctx.globalAlpha = 0.3;
+        ctx.beginPath();
+        ctx.arc(pu.x, bobY, CONFIG.POWERUP_SIZE + 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Main circle
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = typeInfo.color;
+        ctx.beginPath();
+        ctx.arc(pu.x, bobY, CONFIG.POWERUP_SIZE, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Border
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Icon
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 18px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(typeInfo.icon, pu.x, bobY);
+
+        ctx.restore();
+    }
+}
+
+function drawEffectIndicators() {
+    const ctx = game.ctx;
+
+    // Draw effect badges above players who have active effects
+    const drawEffectBadge = (entity, effects) => {
+        let badges = [];
+        if (effects.speed > 0) badges.push({ color: '#00E5FF', icon: '⚡', time: effects.speed });
+        if (effects.highJump > 0) badges.push({ color: '#76FF03', icon: '🦘', time: effects.highJump });
+
+        for (let i = 0; i < badges.length; i++) {
+            const badge = badges[i];
+            const bx = entity.x - (badges.length - 1) * 12 + i * 24;
+            const by = entity.y - entity.height - 30;
+
+            // Flashing when about to expire
+            if (badge.time < 2 && Math.floor(badge.time * 4) % 2 === 0) continue;
+
+            ctx.save();
+            ctx.shadowColor = badge.color;
+            ctx.shadowBlur = 8;
+
+            ctx.fillStyle = badge.color;
+            ctx.globalAlpha = 0.8;
+            ctx.beginPath();
+            ctx.arc(bx, by, 10, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.shadowBlur = 0;
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = '#fff';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(badge.icon, bx, by);
+
+            ctx.restore();
+        }
+    };
+
+    drawEffectBadge(game.player, game.playerEffects);
+    drawEffectBadge(game.cpu, game.cpuEffects);
 }
 
 function drawControls() {
