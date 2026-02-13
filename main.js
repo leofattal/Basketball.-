@@ -909,8 +909,37 @@ function updateBall(dt) {
             game.ball.x += game.ball.vx * dt;
             game.ball.y += game.ball.vy * dt;
 
+            // Air interception - high jump power-up lets you catch the ball mid-air
+            const interceptRange = 60;
+            const checkIntercept = (entity, entityName, effects) => {
+                if (effects.highJump > 0 && !entity.isGrounded) {
+                    const dx = game.ball.x - entity.x;
+                    const dy = game.ball.y - (entity.y - entity.height / 2);
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < interceptRange && game.ball.shotFrom && game.ball.shotFrom.shooter !== entityName) {
+                        // Catch and clear the ball away from the hoop
+                        game.ball.owner = entityName;
+                        game.ball.inAir = false;
+                        game.ball.vx = 0;
+                        game.ball.vy = 0;
+                        game.ball.shotFrom = null;
+                        playSound('block');
+
+                        if (gameMode === 'multiplayer') {
+                            emitBallPickup(entityName);
+                        }
+                        return true;
+                    }
+                }
+                return false;
+            };
+
+            if (!checkIntercept(game.player, 'player', game.playerEffects)) {
+                checkIntercept(game.cpu, 'cpu', game.cpuEffects);
+            }
+
             // Floor bounce
-            if (game.ball.y >= CONFIG.COURT_FLOOR_Y) {
+            if (game.ball.inAir && game.ball.y >= CONFIG.COURT_FLOOR_Y) {
                 game.ball.y = CONFIG.COURT_FLOOR_Y;
                 game.ball.vy *= -0.6;
                 game.ball.vx *= 0.8;
@@ -922,7 +951,7 @@ function updateBall(dt) {
             }
 
             // Wall bounce
-            if (game.ball.x < CONFIG.BALL_RADIUS || game.ball.x > game.width - CONFIG.BALL_RADIUS) {
+            if (game.ball.inAir && (game.ball.x < CONFIG.BALL_RADIUS || game.ball.x > game.width - CONFIG.BALL_RADIUS)) {
                 game.ball.vx *= -0.7;
                 game.ball.x = Math.max(CONFIG.BALL_RADIUS, Math.min(game.width - CONFIG.BALL_RADIUS, game.ball.x));
             }
