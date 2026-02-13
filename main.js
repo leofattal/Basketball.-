@@ -52,7 +52,7 @@ const CONFIG = {
 
     // Power-ups
     POWERUP_SPAWN_INTERVAL: 8, // seconds between spawns
-    POWERUP_DURATION: 5, // seconds each power-up lasts
+    POWERUP_DURATION: 10, // seconds each power-up lasts
     POWERUP_SIZE: 20, // radius
     POWERUP_PICKUP_RANGE: 40,
 };
