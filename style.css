@@ -589,3 +589,229 @@ button:active {
         height: calc(100% - 140px) !important;
     }
 }
+
+/* Coin Display */
+.coin-display {
+    font-size: 20px;
+    color: #FFD700;
+    font-weight: bold;
+    margin: 8px 0;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+.shop-menu-btn {
+    background: linear-gradient(135deg, #FFD700 0%, #FFA000 100%) !important;
+    color: #333 !important;
+}
+
+/* Shop Screen */
+#shop-screen {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 200;
+}
+
+.shop-content {
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(10px);
+    border-radius: 16px;
+    padding: 25px;
+    width: 90%;
+    max-width: 500px;
+    max-height: 90vh;
+    overflow-y: auto;
+    color: white;
+}
+
+.shop-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.shop-header h2 {
+    font-size: 22px;
+}
+
+.shop-section-title {
+    font-size: 16px;
+    color: #aaa;
+    margin: 15px 0 8px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.shop-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.shop-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 10px 14px;
+    border: 1px solid rgba(255,255,255,0.1);
+}
+
+.shop-card.equipped {
+    border-color: #FFD700;
+    background: rgba(255,215,0,0.1);
+}
+
+.shop-card.maxed {
+    opacity: 0.6;
+}
+
+.shop-card-icon {
+    font-size: 28px;
+    width: 40px;
+    text-align: center;
+}
+
+.shop-card-info {
+    flex: 1;
+}
+
+.shop-card-name {
+    font-weight: bold;
+    font-size: 14px;
+}
+
+.shop-card-desc {
+    font-size: 11px;
+    color: #aaa;
+    margin-top: 2px;
+}
+
+.shop-card-levels {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.level-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.3);
+}
+
+.level-dot.filled {
+    background: #4CAF50;
+    border-color: #4CAF50;
+    box-shadow: 0 0 4px #4CAF50;
+}
+
+.cosmetic-preview {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.3);
+}
+
+.trail-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    background: rgba(255,255,255,0.1);
+}
+
+.shop-buy-btn {
+    padding: 6px 14px;
+    border: none;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: bold;
+    cursor: pointer;
+    white-space: nowrap;
+    background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+    color: white;
+    transition: transform 0.1s;
+}
+
+.shop-buy-btn:active:not(:disabled) {
+    transform: scale(0.95);
+}
+
+.shop-buy-btn.maxed {
+    background: #555;
+    color: #999;
+    cursor: default;
+}
+
+.shop-buy-btn.cant-afford {
+    background: #555;
+    color: #999;
+    cursor: not-allowed;
+}
+
+.shop-buy-btn.equip-btn {
+    background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+}
+
+.shop-buy-btn.equipped-btn {
+    background: linear-gradient(135deg, #FFD700 0%, #FFA000 100%);
+    color: #333;
+}
+
+/* Game Over Overlay */
+#game-over-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 300;
+}
+
+.game-over-content {
+    background: rgba(0, 0, 0, 0.9);
+    backdrop-filter: blur(10px);
+    border-radius: 16px;
+    padding: 30px;
+    text-align: center;
+    color: white;
+    min-width: 280px;
+}
+
+.game-over-content h2 {
+    font-size: 32px;
+    margin-bottom: 20px;
+}
+
+.coin-earnings {
+    margin: 15px 0 20px;
+}
+
+.earning-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    font-size: 16px;
+    color: #ccc;
+}
+
+.earning-row.total {
+    border-top: 1px solid rgba(255,255,255,0.2);
+    padding-top: 10px;
+    margin-top: 5px;
+    color: #FFD700;
+    font-weight: bold;
+    font-size: 18px;
+}
+
+.earning-row.balance {
+    color: #aaa;
+    font-size: 14px;
+}

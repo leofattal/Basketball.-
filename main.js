@@ -58,6 +58,74 @@ const CONFIG = {
 };
 
 // ====================
+// PROGRESSION SYSTEM
+// ====================
+
+const UPGRADES = {
+    speed:    { label: 'Speed Boost',    icon: '⚡', desc: '+10% move speed per level', costs: [50, 150, 400], maxLevel: 3 },
+    jump:     { label: 'Jump Power',     icon: '🦘', desc: '+10% jump height per level', costs: [50, 150, 400], maxLevel: 3 },
+    accuracy: { label: 'Shot Control',   icon: '🎯', desc: 'Accuracy meter 10% slower per level', costs: [75, 200, 500], maxLevel: 3 },
+    steal:    { label: 'Steal Range',    icon: '🤚', desc: '+15% steal/pickup range per level', costs: [75, 200, 500], maxLevel: 3 },
+};
+
+const COSMETICS = {
+    blue:     { label: 'Blue Player',    color: '#2196F3', cost: 100 },
+    purple:   { label: 'Purple Player',  color: '#9C27B0', cost: 100 },
+    gold:     { label: 'Gold Player',    color: '#FFD700', cost: 250 },
+    trail:    { label: 'Speed Trail',    color: null,       cost: 300 },
+};
+
+let playerProgress = {
+    coins: 0,
+    upgrades: { speed: 0, jump: 0, accuracy: 0, steal: 0 },
+    cosmetics: [], // owned cosmetic ids
+    equippedColor: null, // cosmetic id or null for default
+    trailEnabled: false,
+};
+
+function loadProgress() {
+    try {
+        const saved = localStorage.getItem('basketball_progress');
+        if (saved) {
+            const data = JSON.parse(saved);
+            playerProgress = { ...playerProgress, ...data };
+        }
+    } catch (e) {
+        console.warn('Could not load progress:', e);
+    }
+    updateMenuCoinDisplay();
+}
+
+function saveProgress() {
+    try {
+        localStorage.setItem('basketball_progress', JSON.stringify(playerProgress));
+    } catch (e) {
+        console.warn('Could not save progress:', e);
+    }
+}
+
+function getUpgradeMultiplier(upgradeId) {
+    const level = playerProgress.upgrades[upgradeId] || 0;
+    if (upgradeId === 'speed') return 1 + level * 0.1;
+    if (upgradeId === 'jump') return 1 + level * 0.1;
+    if (upgradeId === 'accuracy') return 1 - level * 0.1; // slower = easier
+    if (upgradeId === 'steal') return 1 + level * 0.15;
+    return 1;
+}
+
+function getPlayerColor() {
+    if (playerProgress.equippedColor && COSMETICS[playerProgress.equippedColor]) {
+        return COSMETICS[playerProgress.equippedColor].color;
+    }
+    return '#4CAF50'; // default green
+}
+
+function updateMenuCoinDisplay() {
+    const el = document.getElementById('menu-coins');
+    if (el) el.textContent = playerProgress.coins;
+}
+
+// ====================
 // GAME STATE
 // ====================
 
@@ -395,7 +463,9 @@ function jump(entity) {
     if (entity.isGrounded) {
         // Check for high jump power-up
         const effects = entity === game.player ? game.playerEffects : game.cpuEffects;
-        const jumpMultiplier = effects.highJump > 0 ? 1.6 : 1;
+        let jumpMultiplier = effects.highJump > 0 ? 1.6 : 1;
+        // Apply permanent jump upgrade (player only)
+        if (entity === game.player) jumpMultiplier *= getUpgradeMultiplier('jump');
 
         entity.vy = -CONFIG.JUMP_POWER * jumpMultiplier;
         entity.isGrounded = false;
@@ -750,7 +820,7 @@ function update(dt) {
             }
         } else if (game.shotStage === 2) {
             // Stage 2: Accuracy meter oscillates (slower - 70 units/sec = ~1.4 sec per sweep)
-            game.shotAccuracy += game.accuracyDirection * dt * 70;
+            game.shotAccuracy += game.accuracyDirection * dt * 70 * getUpgradeMultiplier('accuracy');
             if (game.shotAccuracy >= 100) {
                 game.shotAccuracy = 100;
                 game.accuracyDirection = -1;
@@ -764,7 +834,7 @@ function update(dt) {
 
 function updatePlayer(dt) {
     const p = game.player;
-    const speedMultiplier = game.playerEffects.speed > 0 ? 1.8 : 1;
+    const speedMultiplier = (game.playerEffects.speed > 0 ? 1.8 : 1) * getUpgradeMultiplier('speed');
 
     // Horizontal movement
     if (game.keys['arrowleft'] || game.keys['a']) {
@@ -972,7 +1042,8 @@ function updateBall(dt) {
             );
 
             let newOwner = null;
-            if (distToPlayer < CONFIG.STEAL_RANGE && distToPlayer < distToCPU) {
+            const playerStealRange = CONFIG.STEAL_RANGE * getUpgradeMultiplier('steal');
+            if (distToPlayer < playerStealRange && distToPlayer < distToCPU) {
                 newOwner = 'player';
             } else if (distToCPU < CONFIG.STEAL_RANGE && distToCPU <= distToPlayer) {
                 newOwner = 'cpu';
@@ -1085,7 +1156,7 @@ function score(scorer, points) {
 
     if (game.score[scorer] >= CONFIG.WIN_SCORE) {
         game.state = STATES.GAME_OVER;
-        showMessage(scorer === 'player' ? 'YOU WIN! 🏆' : 'CPU WINS!', null);
+        endGame(scorer === 'player');
     } else {
         showMessage(message, 1500);
         setTimeout(() => {
@@ -1097,14 +1168,24 @@ function score(scorer, points) {
 
 function endGameByTime() {
     game.state = STATES.GAME_OVER;
+    const playerWon = game.score.player > game.score.cpu;
+    const tied = game.score.player === game.score.cpu;
+    endGame(playerWon, tied);
+}
 
-    if (game.score.player > game.score.cpu) {
-        showMessage('TIME\'S UP! YOU WIN! 🏆', null);
-    } else if (game.score.cpu > game.score.player) {
-        showMessage('TIME\'S UP! CPU WINS!', null);
-    } else {
-        showMessage('TIME\'S UP! TIE GAME! 🤝', null);
-    }
+function endGame(playerWon, tied) {
+    // Calculate coin reward
+    const baseReward = playerWon ? 100 : (tied ? 50 : 25);
+    const scoreBonus = game.score.player * 5;
+    const totalCoins = baseReward + scoreBonus;
+
+    playerProgress.coins += totalCoins;
+    saveProgress();
+    updateMenuCoinDisplay();
+
+    // Show game over overlay
+    const resultText = tied ? "TIE GAME!" : (playerWon ? "YOU WIN!" : "YOU LOSE!");
+    showGameOverScreen(resultText, baseReward, scoreBonus, totalCoins);
 }
 
 // ====================
@@ -1131,18 +1212,20 @@ function render() {
     let playerColor, cpuColor;
     if (gameMode === 'multiplayer') {
         if (multiplayerData.playerNumber === 1) {
-            // I'm player 1: I'm green, opponent (cpu) is red
-            playerColor = '#4CAF50';
+            playerColor = getPlayerColor();
             cpuColor = '#e94560';
         } else {
-            // I'm player 2: I'm red, opponent (cpu) is green
-            playerColor = '#e94560';
+            playerColor = getPlayerColor();
             cpuColor = '#4CAF50';
         }
     } else {
-        // Singleplayer: player is green, CPU is red
-        playerColor = '#4CAF50';
+        playerColor = getPlayerColor();
         cpuColor = '#e94560';
+    }
+
+    // Draw speed trail if cosmetic enabled and player is moving
+    if (playerProgress.trailEnabled && Math.abs(game.player.vx) > 50) {
+        drawSpeedTrail(game.player, playerColor);
     }
 
     drawPlayer(game.cpu, cpuColor);
@@ -1434,6 +1517,24 @@ function drawShootingMeters() {
     }
 }
 
+function drawSpeedTrail(entity, color) {
+    const ctx = game.ctx;
+    const direction = entity.vx > 0 ? -1 : 1;
+    ctx.save();
+    for (let i = 1; i <= 4; i++) {
+        const alpha = 0.15 - i * 0.03;
+        ctx.fillStyle = color;
+        ctx.globalAlpha = Math.max(0, alpha);
+        ctx.fillRect(
+            entity.x - entity.width / 2 + direction * i * 12,
+            entity.y - entity.height,
+            entity.width,
+            entity.height
+        );
+    }
+    ctx.restore();
+}
+
 function drawPowerups() {
     const ctx = game.ctx;
 
@@ -1579,6 +1680,150 @@ function showMessage(text, duration) {
 
 function hideMessage() {
     document.getElementById('message').classList.remove('show');
+}
+
+// ====================
+// GAME OVER & SHOP
+// ====================
+
+function showGameOverScreen(resultText, baseReward, scoreBonus, totalCoins) {
+    const overlay = document.getElementById('game-over-overlay');
+    document.getElementById('game-over-result').textContent = resultText;
+    document.getElementById('coin-base').textContent = baseReward;
+    document.getElementById('coin-bonus').textContent = scoreBonus;
+    document.getElementById('coin-total').textContent = totalCoins;
+    document.getElementById('coin-balance').textContent = playerProgress.coins;
+    overlay.style.display = 'flex';
+}
+
+function hideGameOverScreen() {
+    document.getElementById('game-over-overlay').style.display = 'none';
+}
+
+function showShop() {
+    document.getElementById('main-menu').style.display = 'none';
+    document.getElementById('shop-screen').style.display = 'flex';
+    renderShop();
+}
+
+function hideShop() {
+    document.getElementById('shop-screen').style.display = 'none';
+    document.getElementById('main-menu').style.display = 'block';
+}
+
+function renderShop() {
+    document.getElementById('shop-coins').textContent = playerProgress.coins;
+
+    // Render upgrades
+    const upgradesContainer = document.getElementById('upgrades-list');
+    upgradesContainer.innerHTML = '';
+    for (const [id, info] of Object.entries(UPGRADES)) {
+        const level = playerProgress.upgrades[id] || 0;
+        const maxed = level >= info.maxLevel;
+        const cost = maxed ? null : info.costs[level];
+        const canAfford = cost !== null && playerProgress.coins >= cost;
+
+        const card = document.createElement('div');
+        card.className = 'shop-card' + (maxed ? ' maxed' : '');
+
+        // Level dots
+        let dots = '';
+        for (let i = 0; i < info.maxLevel; i++) {
+            dots += `<span class="level-dot ${i < level ? 'filled' : ''}"></span>`;
+        }
+
+        card.innerHTML = `
+            <div class="shop-card-icon">${info.icon}</div>
+            <div class="shop-card-info">
+                <div class="shop-card-name">${info.label}</div>
+                <div class="shop-card-desc">${info.desc}</div>
+                <div class="shop-card-levels">${dots}</div>
+            </div>
+            <button class="shop-buy-btn ${maxed ? 'maxed' : (canAfford ? '' : 'cant-afford')}"
+                    ${maxed || !canAfford ? 'disabled' : ''}>
+                ${maxed ? 'MAX' : `${cost} coins`}
+            </button>
+        `;
+
+        if (!maxed && canAfford) {
+            card.querySelector('.shop-buy-btn').addEventListener('click', () => {
+                buyUpgrade(id);
+            });
+        }
+        upgradesContainer.appendChild(card);
+    }
+
+    // Render cosmetics
+    const cosmeticsContainer = document.getElementById('cosmetics-list');
+    cosmeticsContainer.innerHTML = '';
+    for (const [id, info] of Object.entries(COSMETICS)) {
+        const owned = playerProgress.cosmetics.includes(id);
+        const equipped = (id === 'trail') ? playerProgress.trailEnabled : (playerProgress.equippedColor === id);
+        const canAfford = !owned && playerProgress.coins >= info.cost;
+
+        const card = document.createElement('div');
+        card.className = 'shop-card cosmetic' + (equipped ? ' equipped' : '');
+
+        const preview = info.color
+            ? `<div class="cosmetic-preview" style="background:${info.color}"></div>`
+            : `<div class="cosmetic-preview trail-preview">✨</div>`;
+
+        card.innerHTML = `
+            ${preview}
+            <div class="shop-card-info">
+                <div class="shop-card-name">${info.label}</div>
+            </div>
+            <button class="shop-buy-btn ${owned ? (equipped ? 'equipped-btn' : 'equip-btn') : (canAfford ? '' : 'cant-afford')}"
+                    ${!owned && !canAfford ? 'disabled' : ''}>
+                ${owned ? (equipped ? 'Equipped' : 'Equip') : `${info.cost} coins`}
+            </button>
+        `;
+
+        const btn = card.querySelector('.shop-buy-btn');
+        if (!owned && canAfford) {
+            btn.addEventListener('click', () => buyCosmetic(id));
+        } else if (owned && !equipped) {
+            btn.addEventListener('click', () => equipCosmetic(id));
+        }
+        cosmeticsContainer.appendChild(card);
+    }
+}
+
+function buyUpgrade(id) {
+    const info = UPGRADES[id];
+    const level = playerProgress.upgrades[id] || 0;
+    if (level >= info.maxLevel) return;
+    const cost = info.costs[level];
+    if (playerProgress.coins < cost) return;
+
+    playerProgress.coins -= cost;
+    playerProgress.upgrades[id] = level + 1;
+    saveProgress();
+    updateMenuCoinDisplay();
+    renderShop();
+    playSound('score');
+}
+
+function buyCosmetic(id) {
+    const info = COSMETICS[id];
+    if (playerProgress.cosmetics.includes(id)) return;
+    if (playerProgress.coins < info.cost) return;
+
+    playerProgress.coins -= info.cost;
+    playerProgress.cosmetics.push(id);
+    // Auto-equip on purchase
+    equipCosmetic(id);
+    playSound('score');
+}
+
+function equipCosmetic(id) {
+    if (id === 'trail') {
+        playerProgress.trailEnabled = !playerProgress.trailEnabled;
+    } else {
+        playerProgress.equippedColor = (playerProgress.equippedColor === id) ? null : id;
+    }
+    saveProgress();
+    renderShop();
 }
 
 function toggleMute() {
@@ -1948,8 +2193,11 @@ function returnToMenu() {
     document.getElementById('game-container').style.display = 'none';
     document.getElementById('matchmaking-lobby').style.display = 'none';
     document.getElementById('ready-lobby').style.display = 'none';
+    document.getElementById('shop-screen').style.display = 'none';
+    document.getElementById('game-over-overlay').style.display = 'none';
     document.getElementById('main-menu').style.display = 'block';
     document.getElementById('connection-status').textContent = '';
+    updateMenuCoinDisplay();
 
     // Remove countdown overlay if exists
     const countdown = document.getElementById('countdown-overlay');
@@ -2029,12 +2277,18 @@ function emitBallPickup(owner) {
 window.addEventListener('DOMContentLoaded', () => {
     console.log('DOM loaded, setting up menu...');
 
+    // Load saved progress
+    loadProgress();
+
     // Setup menu buttons
     const vsCpuBtn = document.getElementById('vs-cpu-btn');
     const multiplayerBtn = document.getElementById('multiplayer-btn');
     const cancelSearchBtn = document.getElementById('cancel-search-btn');
     const readyBtn = document.getElementById('ready-btn');
     const leaveLobbyBtn = document.getElementById('leave-lobby-btn');
+    const shopBtn = document.getElementById('shop-btn');
+    const shopBackBtn = document.getElementById('shop-back-btn');
+    const gameOverContinueBtn = document.getElementById('game-over-continue-btn');
 
     if (vsCpuBtn) {
         vsCpuBtn.addEventListener('click', () => {
@@ -2086,6 +2340,21 @@ window.addEventListener('DOMContentLoaded', () => {
         leaveLobbyBtn.addEventListener('click', () => {
             console.log('Leave lobby clicked');
             leaveLobby();
+        });
+    }
+
+    if (shopBtn) {
+        shopBtn.addEventListener('click', () => showShop());
+    }
+
+    if (shopBackBtn) {
+        shopBackBtn.addEventListener('click', () => hideShop());
+    }
+
+    if (gameOverContinueBtn) {
+        gameOverContinueBtn.addEventListener('click', () => {
+            hideGameOverScreen();
+            returnToMenu();
         });
     }
 });

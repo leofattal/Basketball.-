@@ -11,11 +11,42 @@
     <!-- Main Menu -->
     <div id="main-menu">
         <h1>🏀 Basketball 1v1</h1>
+        <div class="coin-display">🪙 <span id="menu-coins">0</span></div>
         <div class="menu-buttons">
             <button id="vs-cpu-btn" class="menu-btn">Play vs CPU</button>
             <button id="multiplayer-btn" class="menu-btn">Play Online</button>
+            <button id="shop-btn" class="menu-btn shop-menu-btn">Shop & Upgrades</button>
         </div>
         <div id="connection-status"></div>
+    </div>
+
+    <!-- Shop Screen -->
+    <div id="shop-screen" style="display: none;">
+        <div class="shop-content">
+            <div class="shop-header">
+                <h2>Shop & Upgrades</h2>
+                <div class="coin-display">🪙 <span id="shop-coins">0</span></div>
+            </div>
+            <h3 class="shop-section-title">Stat Upgrades</h3>
+            <div id="upgrades-list" class="shop-grid"></div>
+            <h3 class="shop-section-title">Cosmetics</h3>
+            <div id="cosmetics-list" class="shop-grid"></div>
+            <button id="shop-back-btn" class="menu-btn cancel-btn">Back to Menu</button>
+        </div>
+    </div>
+
+    <!-- Game Over Overlay -->
+    <div id="game-over-overlay" style="display: none;">
+        <div class="game-over-content">
+            <h2 id="game-over-result">YOU WIN!</h2>
+            <div class="coin-earnings">
+                <div class="earning-row"><span>Result Bonus</span><span>+<span id="coin-base">0</span> 🪙</span></div>
+                <div class="earning-row"><span>Score Bonus</span><span>+<span id="coin-bonus">0</span> 🪙</span></div>
+                <div class="earning-row total"><span>Total</span><span>+<span id="coin-total">0</span> 🪙</span></div>
+                <div class="earning-row balance"><span>Balance</span><span><span id="coin-balance">0</span> 🪙</span></div>
+            </div>
+            <button id="game-over-continue-btn" class="menu-btn">Continue</button>
+        </div>
     </div>
 
     <!-- Matchmaking Lobby -->
