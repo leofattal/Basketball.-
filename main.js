@@ -4,6 +4,7 @@
 
 let socket = null;
 let gameMode = 'singleplayer'; // 'singleplayer' or 'multiplayer'
+let currentGameType = 'basketball'; // 'basketball' or 'soccer'
 let multiplayerData = {
     roomId: null,
     playerNumber: null, // 1 or 2
@@ -57,6 +58,30 @@ const CONFIG = {
     POWERUP_PICKUP_RANGE: 40,
 };
 
+// Soccer-specific config overrides
+const SOCCER_CONFIG = {
+    BALL_GRAVITY: 500,
+    SHOT_POWER_MIN: 350,
+    SHOT_POWER_MAX: 650,
+    SHOT_ANGLE_MIN: -20,
+    SHOT_ANGLE_MAX: 40,
+    BALL_RADIUS: 10,
+    WIN_SCORE: 10,
+    BALL_BOUNCE: 0.6,
+    GOAL_LEFT_X: 30,
+    GOAL_RIGHT_X: 770,
+    GOAL_WIDTH: 30,
+    GOAL_HEIGHT: 120,
+    GOAL_Y: 380, // top of goal opening (COURT_FLOOR_Y - GOAL_HEIGHT)
+};
+
+function getConfig(key) {
+    if (currentGameType === 'soccer' && key in SOCCER_CONFIG) {
+        return SOCCER_CONFIG[key];
+    }
+    return CONFIG[key];
+}
+
 // ====================
 // PROGRESSION SYSTEM
 // ====================
@@ -77,7 +102,8 @@ const COSMETICS = {
 
 let playerProgress = {
     coins: 0,
-    upgrades: { speed: 0, jump: 0, accuracy: 0, steal: 0 },
+    basketballUpgrades: { speed: 0, jump: 0, accuracy: 0, steal: 0 },
+    soccerUpgrades: { speed: 0, jump: 0, accuracy: 0, steal: 0 },
     cosmetics: [], // owned cosmetic ids
     equippedColor: null, // cosmetic id or null for default
     trailEnabled: false,
@@ -88,6 +114,12 @@ function loadProgress() {
         const saved = localStorage.getItem('basketball_progress');
         if (saved) {
             const data = JSON.parse(saved);
+            // Migrate old single upgrades field to per-game upgrades
+            if (data.upgrades && !data.basketballUpgrades) {
+                data.basketballUpgrades = data.upgrades;
+                data.soccerUpgrades = { speed: 0, jump: 0, accuracy: 0, steal: 0 };
+                delete data.upgrades;
+            }
             playerProgress = { ...playerProgress, ...data };
         }
     } catch (e) {
@@ -104,8 +136,12 @@ function saveProgress() {
     }
 }
 
+function getCurrentUpgrades() {
+    return currentGameType === 'soccer' ? playerProgress.soccerUpgrades : playerProgress.basketballUpgrades;
+}
+
 function getUpgradeMultiplier(upgradeId) {
-    const level = playerProgress.upgrades[upgradeId] || 0;
+    const level = getCurrentUpgrades()[upgradeId] || 0;
     if (upgradeId === 'speed') return 1 + level * 0.1;
     if (upgradeId === 'jump') return 1 + level * 0.1;
     if (upgradeId === 'accuracy') return 1 - level * 0.1; // slower = easier
@@ -123,6 +159,8 @@ function getPlayerColor() {
 function updateMenuCoinDisplay() {
     const el = document.getElementById('menu-coins');
     if (el) el.textContent = playerProgress.coins;
+    const selectEl = document.getElementById('select-coins');
+    if (selectEl) selectEl.textContent = playerProgress.coins;
 }
 
 // ====================
@@ -499,24 +537,42 @@ function shoot(entity) {
         return;
     }
 
-    // Calculate shot - target the opponent's hoop
-    // In multiplayer: player 1 shoots at left hoop, player 2 shoots at right hoop
-    // In singleplayer: player shoots at left hoop, CPU shoots at right hoop
-    let targetX;
-    if (entity === game.player) {
-        if (gameMode === 'multiplayer' && multiplayerData.playerNumber === 2) {
-            targetX = CONFIG.HOOP_RIGHT_X; // Player 2 shoots at right hoop
+    // Calculate shot/kick - target the opponent's hoop/goal
+    let targetX, targetY;
+    if (currentGameType === 'soccer') {
+        // Soccer: kick toward goal
+        if (entity === game.player) {
+            if (gameMode === 'multiplayer' && multiplayerData.playerNumber === 2) {
+                targetX = SOCCER_CONFIG.GOAL_RIGHT_X;
+            } else {
+                targetX = SOCCER_CONFIG.GOAL_LEFT_X;
+            }
         } else {
-            targetX = CONFIG.HOOP_LEFT_X;  // Player 1 / singleplayer shoots at left hoop
+            if (gameMode === 'multiplayer' && multiplayerData.playerNumber === 2) {
+                targetX = SOCCER_CONFIG.GOAL_LEFT_X;
+            } else {
+                targetX = SOCCER_CONFIG.GOAL_RIGHT_X;
+            }
         }
+        // Target middle of goal opening
+        targetY = SOCCER_CONFIG.GOAL_Y + SOCCER_CONFIG.GOAL_HEIGHT / 2;
     } else {
-        if (gameMode === 'multiplayer' && multiplayerData.playerNumber === 2) {
-            targetX = CONFIG.HOOP_LEFT_X;  // Opponent of player 2 shoots at left hoop
+        // Basketball: shoot at hoop
+        if (entity === game.player) {
+            if (gameMode === 'multiplayer' && multiplayerData.playerNumber === 2) {
+                targetX = CONFIG.HOOP_RIGHT_X;
+            } else {
+                targetX = CONFIG.HOOP_LEFT_X;
+            }
         } else {
-            targetX = CONFIG.HOOP_RIGHT_X; // CPU / opponent of player 1 shoots at right hoop
+            if (gameMode === 'multiplayer' && multiplayerData.playerNumber === 2) {
+                targetX = CONFIG.HOOP_LEFT_X;
+            } else {
+                targetX = CONFIG.HOOP_RIGHT_X;
+            }
         }
+        targetY = CONFIG.HOOP_Y;
     }
-    const targetY = CONFIG.HOOP_Y;
 
     const dx = targetX - entity.x;
     const dy = targetY - (entity.y - entity.height / 2);
@@ -589,20 +645,28 @@ function shoot(entity) {
     }
 
     // Calculate proper arc trajectory using projectile physics
-    // We need to find the velocity that will make the ball land at the hoop
-    const gravity = CONFIG.BALL_GRAVITY;
+    const gravity = getConfig('BALL_GRAVITY');
 
-    // Choose arc height based on distance - longer shots need higher arcs
+    // Choose arc height based on distance and game type
     let arcHeight;
-    if (distanceFromHoop <= 150) {
-        // 2-pointer: moderate arc
-        arcHeight = 120;
-    } else if (distanceFromHoop < 350) {
-        // 3-pointer: higher arc for better angle into hoop
-        arcHeight = 180;
+    if (currentGameType === 'soccer') {
+        // Soccer: lower arcs for kicks
+        if (distanceFromHoop <= 200) {
+            arcHeight = 40;
+        } else if (distanceFromHoop < 400) {
+            arcHeight = 70;
+        } else {
+            arcHeight = 100;
+        }
     } else {
-        // Half-court: very high arc
-        arcHeight = 250;
+        // Basketball: high arcs for shooting
+        if (distanceFromHoop <= 150) {
+            arcHeight = 120;
+        } else if (distanceFromHoop < 350) {
+            arcHeight = 180;
+        } else {
+            arcHeight = 250;
+        }
     }
 
     // Apply power quality to arc height (lower power = lower arc = harder shot)
@@ -975,7 +1039,7 @@ function updateBall(dt) {
         // Only host simulates ball physics in multiplayer
         if (isHost) {
             // Ball physics
-            game.ball.vy += CONFIG.BALL_GRAVITY * dt;
+            game.ball.vy += getConfig('BALL_GRAVITY') * dt;
             game.ball.x += game.ball.vx * dt;
             game.ball.y += game.ball.vy * dt;
 
@@ -1063,7 +1127,12 @@ function updateBall(dt) {
 }
 
 function checkScoring() {
-    // Check if ball goes through hoop
+    if (currentGameType === 'soccer') {
+        checkSoccerScoring();
+        return;
+    }
+
+    // Basketball: Check if ball goes through hoop
     const hoopLeft = { x: CONFIG.HOOP_LEFT_X, y: CONFIG.HOOP_Y };
     const hoopRight = { x: CONFIG.HOOP_RIGHT_X, y: CONFIG.HOOP_Y };
 
@@ -1083,9 +1152,6 @@ function checkScoring() {
         detectionRadius = CONFIG.HOOP_RADIUS - 5;
     }
 
-    // Determine which hoop the player shoots at based on player number
-    // Player 1 / singleplayer shoots at left hoop
-    // Player 2 shoots at right hoop
     const playerTargetHoop = (gameMode === 'multiplayer' && multiplayerData.playerNumber === 2)
         ? hoopRight
         : hoopLeft;
@@ -1093,7 +1159,6 @@ function checkScoring() {
         ? hoopLeft
         : hoopRight;
 
-    // Check if ball goes through player's target hoop
     if (Math.abs(game.ball.x - playerTargetHoop.x) < detectionRadius &&
         Math.abs(game.ball.y - playerTargetHoop.y) < 30) {
 
@@ -1104,7 +1169,6 @@ function checkScoring() {
         }
     }
 
-    // Check if ball goes through CPU/opponent's target hoop
     if (game.ball.shotFrom &&
         Math.abs(game.ball.x - cpuTargetHoop.x) < detectionRadius &&
         Math.abs(game.ball.y - cpuTargetHoop.y) < 30) {
@@ -1113,6 +1177,50 @@ function checkScoring() {
             const points = calculatePoints(game.ball.shotFrom);
             game.ball.shotFrom = null;
             score('cpu', points);
+        }
+    }
+}
+
+function checkSoccerScoring() {
+    // Soccer: check if ball enters goal area
+    if (!game.ball.inAir) return;
+
+    const ballX = game.ball.x;
+    const ballY = game.ball.y;
+    const goalTop = SOCCER_CONFIG.GOAL_Y;
+    const goalBottom = CONFIG.COURT_FLOOR_Y;
+
+    // Determine which goal the player targets
+    const playerGoalX = (gameMode === 'multiplayer' && multiplayerData.playerNumber === 2)
+        ? SOCCER_CONFIG.GOAL_RIGHT_X
+        : SOCCER_CONFIG.GOAL_LEFT_X;
+    const cpuGoalX = (gameMode === 'multiplayer' && multiplayerData.playerNumber === 2)
+        ? SOCCER_CONFIG.GOAL_LEFT_X
+        : SOCCER_CONFIG.GOAL_RIGHT_X;
+
+    // Check player's target goal (left goal)
+    if (playerGoalX === SOCCER_CONFIG.GOAL_LEFT_X) {
+        if (ballX <= SOCCER_CONFIG.GOAL_LEFT_X + 10 && ballY >= goalTop && ballY <= goalBottom) {
+            game.ball.shotFrom = null;
+            score('player', 1);
+            return;
+        }
+        if (ballX >= SOCCER_CONFIG.GOAL_RIGHT_X - 10 && ballY >= goalTop && ballY <= goalBottom) {
+            game.ball.shotFrom = null;
+            score('cpu', 1);
+            return;
+        }
+    } else {
+        // Player targets right goal
+        if (ballX >= SOCCER_CONFIG.GOAL_RIGHT_X - 10 && ballY >= goalTop && ballY <= goalBottom) {
+            game.ball.shotFrom = null;
+            score('player', 1);
+            return;
+        }
+        if (ballX <= SOCCER_CONFIG.GOAL_LEFT_X + 10 && ballY >= goalTop && ballY <= goalBottom) {
+            game.ball.shotFrom = null;
+            score('cpu', 1);
+            return;
         }
     }
 }
@@ -1195,16 +1303,31 @@ function endGame(playerWon, tied) {
 function render() {
     const ctx = game.ctx;
 
-    // Clear
-    ctx.fillStyle = '#16213e';
-    ctx.fillRect(0, 0, game.width, game.height);
+    // Clear - different background per game
+    if (currentGameType === 'soccer') {
+        // Sky gradient for soccer
+        const skyGrad = ctx.createLinearGradient(0, 0, 0, CONFIG.COURT_FLOOR_Y);
+        skyGrad.addColorStop(0, '#87CEEB');
+        skyGrad.addColorStop(1, '#B0E0E6');
+        ctx.fillStyle = skyGrad;
+        ctx.fillRect(0, 0, game.width, CONFIG.COURT_FLOOR_Y);
+        ctx.fillStyle = '#4CAF50';
+        ctx.fillRect(0, CONFIG.COURT_FLOOR_Y, game.width, game.height - CONFIG.COURT_FLOOR_Y);
+    } else {
+        ctx.fillStyle = '#16213e';
+        ctx.fillRect(0, 0, game.width, game.height);
+    }
 
-    // Draw court
-    drawCourt();
-
-    // Draw hoops
-    drawHoop(CONFIG.HOOP_LEFT_X, CONFIG.HOOP_Y, true);
-    drawHoop(CONFIG.HOOP_RIGHT_X, CONFIG.HOOP_Y, false);
+    // Draw court/field
+    if (currentGameType === 'soccer') {
+        drawField();
+        drawGoal(SOCCER_CONFIG.GOAL_LEFT_X, true);
+        drawGoal(SOCCER_CONFIG.GOAL_RIGHT_X, false);
+    } else {
+        drawCourt();
+        drawHoop(CONFIG.HOOP_LEFT_X, CONFIG.HOOP_Y, true);
+        drawHoop(CONFIG.HOOP_RIGHT_X, CONFIG.HOOP_Y, false);
+    }
 
     // Draw players with consistent colors across both screens
     // In multiplayer: Player 1 is always green, Player 2 is always red
@@ -1310,6 +1433,105 @@ function drawHoop(x, y, facingRight) {
     }
 }
 
+function drawField() {
+    const ctx = game.ctx;
+
+    // Grass with darker lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.lineWidth = 2;
+
+    // Midline
+    ctx.beginPath();
+    ctx.moveTo(game.width / 2, CONFIG.COURT_FLOOR_Y - 200);
+    ctx.lineTo(game.width / 2, CONFIG.COURT_FLOOR_Y);
+    ctx.stroke();
+
+    // Center circle
+    ctx.beginPath();
+    ctx.arc(game.width / 2, CONFIG.COURT_FLOOR_Y, 60, 0, Math.PI, true);
+    ctx.stroke();
+
+    // Penalty areas
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx.strokeRect(0, CONFIG.COURT_FLOOR_Y - 150, 100, 150);
+    ctx.strokeRect(game.width - 100, CONFIG.COURT_FLOOR_Y - 150, 100, 150);
+
+    // Ground line
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, CONFIG.COURT_FLOOR_Y);
+    ctx.lineTo(game.width, CONFIG.COURT_FLOOR_Y);
+    ctx.stroke();
+}
+
+function drawGoal(x, isLeft) {
+    const ctx = game.ctx;
+    const goalH = SOCCER_CONFIG.GOAL_HEIGHT;
+    const goalW = SOCCER_CONFIG.GOAL_WIDTH;
+    const goalTop = SOCCER_CONFIG.GOAL_Y;
+
+    // Goal frame
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 4;
+
+    if (isLeft) {
+        // Left goal: opens to the right
+        ctx.beginPath();
+        ctx.moveTo(x, goalTop);
+        ctx.lineTo(x, CONFIG.COURT_FLOOR_Y); // left post
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, goalTop);
+        ctx.lineTo(x + goalW, goalTop); // crossbar
+        ctx.stroke();
+        // Back of goal (subtle)
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x, goalTop);
+        ctx.lineTo(x - 15, goalTop - 10);
+        ctx.lineTo(x - 15, CONFIG.COURT_FLOOR_Y);
+        ctx.stroke();
+        // Net lines
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.lineWidth = 1;
+        for (let i = 1; i < 6; i++) {
+            ctx.beginPath();
+            ctx.moveTo(x, goalTop + i * (goalH / 6));
+            ctx.lineTo(x - 15, goalTop - 10 + i * ((goalH + 10) / 6));
+            ctx.stroke();
+        }
+    } else {
+        // Right goal: opens to the left
+        ctx.beginPath();
+        ctx.moveTo(x, goalTop);
+        ctx.lineTo(x, CONFIG.COURT_FLOOR_Y); // right post
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, goalTop);
+        ctx.lineTo(x - goalW, goalTop); // crossbar
+        ctx.stroke();
+        // Back of goal
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x, goalTop);
+        ctx.lineTo(x + 15, goalTop - 10);
+        ctx.lineTo(x + 15, CONFIG.COURT_FLOOR_Y);
+        ctx.stroke();
+        // Net lines
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.lineWidth = 1;
+        for (let i = 1; i < 6; i++) {
+            ctx.beginPath();
+            ctx.moveTo(x, goalTop + i * (goalH / 6));
+            ctx.lineTo(x + 15, goalTop - 10 + i * ((goalH + 10) / 6));
+            ctx.stroke();
+        }
+    }
+}
+
 function drawPlayer(player, color) {
     const ctx = game.ctx;
     const x = player.x;
@@ -1348,21 +1570,42 @@ function drawPlayer(player, color) {
 function drawBall() {
     const ctx = game.ctx;
 
-    const gradient = ctx.createRadialGradient(
-        game.ball.x - 3, game.ball.y - 3, 2,
-        game.ball.x, game.ball.y, CONFIG.BALL_RADIUS
-    );
-    gradient.addColorStop(0, '#ff8c42');
-    gradient.addColorStop(1, '#ff6b35');
-
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(game.ball.x, game.ball.y, CONFIG.BALL_RADIUS, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = '#d64933';
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    if (currentGameType === 'soccer') {
+        // White soccer ball
+        const gradient = ctx.createRadialGradient(
+            game.ball.x - 3, game.ball.y - 3, 2,
+            game.ball.x, game.ball.y, CONFIG.BALL_RADIUS
+        );
+        gradient.addColorStop(0, '#ffffff');
+        gradient.addColorStop(1, '#e0e0e0');
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(game.ball.x, game.ball.y, CONFIG.BALL_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#333333';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        // Pentagon pattern hint
+        ctx.fillStyle = '#333333';
+        ctx.beginPath();
+        ctx.arc(game.ball.x, game.ball.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+    } else {
+        // Orange basketball
+        const gradient = ctx.createRadialGradient(
+            game.ball.x - 3, game.ball.y - 3, 2,
+            game.ball.x, game.ball.y, CONFIG.BALL_RADIUS
+        );
+        gradient.addColorStop(0, '#ff8c42');
+        gradient.addColorStop(1, '#ff6b35');
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(game.ball.x, game.ball.y, CONFIG.BALL_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#d64933';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
 }
 
 function drawShootingMeters() {
@@ -1703,6 +1946,12 @@ function hideGameOverScreen() {
 function showShop() {
     document.getElementById('main-menu').style.display = 'none';
     document.getElementById('shop-screen').style.display = 'flex';
+    // Update shop title to show which game's upgrades
+    const shopTitle = document.querySelector('.shop-header h2');
+    if (shopTitle) {
+        const icon = currentGameType === 'soccer' ? '\u26BD' : '\uD83C\uDFC0';
+        shopTitle.textContent = `${icon} ${currentGameType === 'soccer' ? 'Soccer' : 'Basketball'} Shop`;
+    }
     renderShop();
 }
 
@@ -1718,7 +1967,7 @@ function renderShop() {
     const upgradesContainer = document.getElementById('upgrades-list');
     upgradesContainer.innerHTML = '';
     for (const [id, info] of Object.entries(UPGRADES)) {
-        const level = playerProgress.upgrades[id] || 0;
+        const level = getCurrentUpgrades()[id] || 0;
         const maxed = level >= info.maxLevel;
         const cost = maxed ? null : info.costs[level];
         const canAfford = cost !== null && playerProgress.coins >= cost;
@@ -1791,13 +2040,14 @@ function renderShop() {
 
 function buyUpgrade(id) {
     const info = UPGRADES[id];
-    const level = playerProgress.upgrades[id] || 0;
+    const upgrades = getCurrentUpgrades();
+    const level = upgrades[id] || 0;
     if (level >= info.maxLevel) return;
     const cost = info.costs[level];
     if (playerProgress.coins < cost) return;
 
     playerProgress.coins -= cost;
-    playerProgress.upgrades[id] = level + 1;
+    upgrades[id] = level + 1;
     saveProgress();
     updateMenuCoinDisplay();
     renderShop();
@@ -2066,8 +2316,33 @@ function initializeSocket() {
     });
 }
 
+function selectGame(gameType) {
+    currentGameType = gameType;
+    document.getElementById('game-select').style.display = 'none';
+    document.getElementById('main-menu').style.display = 'block';
+    const title = document.getElementById('menu-title');
+    if (gameType === 'soccer') {
+        title.textContent = '\u26BD Soccer 1v1';
+    } else {
+        title.textContent = '\uD83C\uDFC0 Basketball 1v1';
+    }
+    updateMenuCoinDisplay();
+}
+
+function showGameSelect() {
+    document.getElementById('main-menu').style.display = 'none';
+    document.getElementById('game-container').style.display = 'none';
+    document.getElementById('matchmaking-lobby').style.display = 'none';
+    document.getElementById('ready-lobby').style.display = 'none';
+    document.getElementById('shop-screen').style.display = 'none';
+    document.getElementById('game-over-overlay').style.display = 'none';
+    document.getElementById('game-select').style.display = 'block';
+    updateMenuCoinDisplay();
+}
+
 function showMatchmakingLobby() {
     document.getElementById('main-menu').style.display = 'none';
+    document.getElementById('game-select').style.display = 'none';
     document.getElementById('ready-lobby').style.display = 'none';
     document.getElementById('game-container').style.display = 'none';
     document.getElementById('matchmaking-lobby').style.display = 'block';
@@ -2075,6 +2350,7 @@ function showMatchmakingLobby() {
 
 function showReadyLobby() {
     document.getElementById('main-menu').style.display = 'none';
+    document.getElementById('game-select').style.display = 'none';
     document.getElementById('matchmaking-lobby').style.display = 'none';
     document.getElementById('game-container').style.display = 'none';
     document.getElementById('ready-lobby').style.display = 'block';
@@ -2176,6 +2452,7 @@ function startMultiplayerGame() {
 
 function startSinglePlayerGame() {
     gameMode = 'singleplayer';
+    document.getElementById('game-select').style.display = 'none';
     document.getElementById('main-menu').style.display = 'none';
     document.getElementById('matchmaking-lobby').style.display = 'none';
     document.getElementById('ready-lobby').style.display = 'none';
@@ -2190,6 +2467,7 @@ function returnToMenu() {
     isReady = false;
     opponentReady = false;
 
+    document.getElementById('game-select').style.display = 'none';
     document.getElementById('game-container').style.display = 'none';
     document.getElementById('matchmaking-lobby').style.display = 'none';
     document.getElementById('ready-lobby').style.display = 'none';
@@ -2279,6 +2557,21 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // Load saved progress
     loadProgress();
+
+    // Setup game selection buttons
+    const selectBasketball = document.getElementById('select-basketball');
+    const selectSoccer = document.getElementById('select-soccer');
+    const backToSelectBtn = document.getElementById('back-to-select-btn');
+
+    if (selectBasketball) {
+        selectBasketball.addEventListener('click', () => selectGame('basketball'));
+    }
+    if (selectSoccer) {
+        selectSoccer.addEventListener('click', () => selectGame('soccer'));
+    }
+    if (backToSelectBtn) {
+        backToSelectBtn.addEventListener('click', () => showGameSelect());
+    }
 
     // Setup menu buttons
     const vsCpuBtn = document.getElementById('vs-cpu-btn');

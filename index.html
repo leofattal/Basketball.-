@@ -4,18 +4,37 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>Basketball 1v1 - Multiplayer</title>
+    <title>Sports 1v1 - Basketball & Soccer</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Main Menu -->
-    <div id="main-menu">
-        <h1>🏀 Basketball 1v1</h1>
+    <!-- Game Selection Screen -->
+    <div id="game-select">
+        <h1>Sports 1v1</h1>
+        <div class="coin-display">🪙 <span id="select-coins">0</span></div>
+        <div class="game-cards">
+            <button id="select-basketball" class="game-card">
+                <div class="game-card-icon">🏀</div>
+                <div class="game-card-title">Basketball</div>
+                <div class="game-card-desc">First to 21 wins</div>
+            </button>
+            <button id="select-soccer" class="game-card">
+                <div class="game-card-icon">⚽</div>
+                <div class="game-card-title">Soccer</div>
+                <div class="game-card-desc">First to 10 goals</div>
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Menu (after game selected) -->
+    <div id="main-menu" style="display: none;">
+        <h1 id="menu-title">🏀 Basketball 1v1</h1>
         <div class="coin-display">🪙 <span id="menu-coins">0</span></div>
         <div class="menu-buttons">
             <button id="vs-cpu-btn" class="menu-btn">Play vs CPU</button>
             <button id="multiplayer-btn" class="menu-btn">Play Online</button>
             <button id="shop-btn" class="menu-btn shop-menu-btn">Shop & Upgrades</button>
+            <button id="back-to-select-btn" class="menu-btn cancel-btn">Back to Games</button>
         </div>
         <div id="connection-status"></div>
     </div>
